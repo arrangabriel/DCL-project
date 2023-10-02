@@ -9,6 +9,8 @@
     (func $load (param $index i32) (result i32)
         local.get $index
         i32.load
+        i32.const 5
+        call $add
     )
 
     (func $add (param $op1 i32) (param $op2 i32) (result i32)
