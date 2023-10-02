@@ -1,33 +1,11 @@
-use wast::core::{Func, FunctionType, Instruction, ValType};
+use wast::core::{Func, FunctionType, Instruction};
 use wast::Wat;
 
-use crate::ast::{walk_ast, AstWalker};
+use crate::ast_parsing::ast::{walk_ast, AstWalker};
+use crate::module_data::{FuncParameter, Function, Module, Signature};
 
-#[derive(Debug)]
-pub struct Module<'a> {
-    functions: Box<[Function<'a>]>,
-}
-
-#[derive(Debug)]
-pub struct Function<'a> {
-    id: Option<String>,
-    signature: Signature<'a>,
-    instructions: &'a [Instruction<'a>],
-}
-
-#[derive(Debug)]
-pub struct Signature<'a> {
-    parameters: Vec<FuncParameter<'a>>,
-    results: Vec<ValType<'a>>,
-}
-
-#[derive(Debug)]
-pub struct FuncParameter<'a> {
-    id: Option<&'a str>,
-    val_type: &'a ValType<'a>,
-}
-
-pub fn parse_module_struct_from_ast<'a>(ast: &'a Wat<'a>) -> Module<'a> {
+/// Get module data struct from ast
+pub fn get_module_data_from_ast<'a>(ast: &'a Wat) -> Module<'a> {
     let extractor = Box::new(AstModuleStructExtractor::new());
     walk_ast(ast, extractor)
 }

@@ -2,7 +2,7 @@ use wast::core::{Func, FunctionType, Instruction, Module, ModuleField, ValType};
 use wast::token::{Id, NameAnnotation};
 use wast::Wat;
 
-use crate::ast::{walk_ast, AstWalker};
+use crate::ast_parsing::ast::{walk_ast, AstWalker};
 
 /// Print a wasm module
 pub fn pretty_print_ast(ast: &Wat) {

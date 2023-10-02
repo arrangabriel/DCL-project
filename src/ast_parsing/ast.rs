@@ -19,7 +19,7 @@ pub trait AstWalker<'a> {
 
 pub fn walk_ast<'a, T: 'a>(
     wat: &'a Wat,
-    mut ast_walker: Box<dyn AstWalker<'a, WalkResult = T> + 'a>,
+    mut ast_walker: Box<(dyn AstWalker<'a, WalkResult = T> + 'a)>,
 ) -> T {
     match wat {
         Wat::Module(module) => {

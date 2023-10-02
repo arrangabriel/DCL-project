@@ -7,22 +7,30 @@ use std::process::exit;
 use wasm_manipulation::parse_wast_string;
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    match parse_config(args) {
-        None => {
-            println!("Usage: [wasm-manipulator] file-path");
-            exit(1)
-        }
-        Some(config) => {
-            let file_path = Path::new(config.file_path.as_str());
-            let mut file = File::open(file_path).expect("Failed to open file");
-            let mut wat_string = String::new();
-            file.read_to_string(&mut wat_string)
-                .expect("Failed to read file");
+    let config = parse_config(env::args().collect()).unwrap_or_else(|| {
+        println!("Usage: [wasm-manipulator] file-path");
+        exit(1)
+    });
 
-            parse_wast_string(wat_string.as_str(), config.print);
-        }
+    let file_path = Path::new(config.file_path.as_str());
+    let mut wat_string = String::new();
+
+    if !file_path.is_file() {
+        println!("No such file: {:?}", config.file_path.as_str());
+        exit(1);
     }
+
+    File::open(file_path)
+        .and_then(|mut file| file.read_to_string(&mut wat_string))
+        .unwrap_or_else(|err| {
+            println!("Failed to read file: {:?}", err);
+            exit(1);
+        });
+
+    parse_wast_string(wat_string.as_str(), config.print).unwrap_or_else(|err| {
+        println!("Failed to parse: {:?}", err);
+        exit(1);
+    });
 }
 
 struct Config {
