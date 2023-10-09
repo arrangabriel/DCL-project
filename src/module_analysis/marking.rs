@@ -2,11 +2,15 @@ use wast::core::Instruction::{self, *};
 
 use crate::module_data::Function;
 
-type MarkedInstruction<'a> = (&'a Instruction<'a>, bool);
+pub type MarkedInstruction<'a> = (&'a Instruction<'a>, bool);
 
-pub fn print_accessors(functions: &[Function]) {
-    let mut safe_functions = Vec::<(&str, Vec<MarkedInstruction>)>::new();
-    let mut unsafe_functions = Vec::<(&str, Vec<MarkedInstruction>)>::new();
+pub type MarkedFunction<'a> = (&'a Function<'a>, Vec<MarkedInstruction<'a>>);
+
+pub fn mark_functions<'a>(
+    functions: &'a [Function],
+) -> (Vec<MarkedFunction<'a>>, Vec<MarkedFunction<'a>>) {
+    let mut safe_functions = Vec::<MarkedFunction<'a>>::new();
+    let mut unsafe_functions = Vec::<MarkedFunction<'a>>::new();
 
     for func in functions {
         let instructions_marked: Vec<MarkedInstruction> = func
@@ -14,45 +18,20 @@ pub fn print_accessors(functions: &[Function]) {
             .iter()
             .map(|instruction| (instruction, is_mem_access_instruction(instruction)))
             .collect();
-        let func_name = func
-            .id
-            .as_ref()
-            .map(|id| id.as_str())
-            .unwrap_or("anonymous");
 
         let func_is_unsafe = instructions_marked
             .iter()
-            .any(|(_, mem_instruction)| *mem_instruction);
+            .any(|(_, is_mem_access)| *is_mem_access);
 
         if func_is_unsafe {
             &mut unsafe_functions
         } else {
             &mut safe_functions
         }
-        .push((func_name, instructions_marked));
+        .push((func, instructions_marked));
     }
 
-    println!("Safe functions:");
-    for (func_name, instructions) in safe_functions {
-        println!("\t{:?}", func_name);
-        for (instruction, _) in instructions {
-            println!("\t\t{:?}", instruction)
-        }
-        println!();
-    }
-
-    println!("Unsafe functions:");
-    for (func_name, instructions) in unsafe_functions {
-        println!("\t{:?}", func_name);
-        for (instruction, is_unsafe) in instructions {
-            if is_unsafe {
-                println!("\t\t{:?}   <- UNSAFE", instruction)
-            } else {
-                println!("\t\t{:?}", instruction)
-            }
-        }
-        println!();
-    }
+    (safe_functions, unsafe_functions)
 }
 
 fn is_mem_access_instruction(instruction: &Instruction) -> bool {

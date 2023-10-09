@@ -2,24 +2,34 @@ use wast::core::{Instruction, ValType};
 
 #[derive(Debug)]
 pub struct Module<'a> {
-    pub(crate) functions: Box<[Function<'a>]>,
+    pub functions: Box<[Function<'a>]>,
 }
 
 #[derive(Debug)]
 pub struct Function<'a> {
-    pub(crate) id: Option<String>,
-    pub(crate) signature: Signature<'a>,
-    pub(crate) instructions: &'a [Instruction<'a>],
+    pub id: Option<String>,
+    pub signature: Signature<'a>,
+    pub instructions: &'a [Instruction<'a>],
 }
 
-#[derive(Debug)]
+impl<'a> Function<'a> {
+    pub fn shallow_clone(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            signature: self.signature.clone(),
+            instructions: self.instructions,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Signature<'a> {
-    pub(crate) parameters: Vec<FuncParameter<'a>>,
-    pub(crate) results: Vec<ValType<'a>>,
+    pub parameters: Vec<FuncParameter<'a>>,
+    pub results: Vec<ValType<'a>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FuncParameter<'a> {
-    pub(crate) id: Option<&'a str>,
-    pub(crate) val_type: &'a ValType<'a>,
+    pub id: Option<&'a str>,
+    pub val_type: &'a ValType<'a>,
 }
