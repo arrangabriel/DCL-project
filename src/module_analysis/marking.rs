@@ -34,7 +34,7 @@ pub fn mark_functions<'a>(
     (safe_functions, unsafe_functions)
 }
 
-fn is_mem_access_instruction(instruction: &Instruction) -> bool {
+pub fn is_mem_access_instruction(instruction: &Instruction) -> bool {
     match instruction {
         GlobalGet(_) | GlobalSet(_) | TableGet(_) | TableSet(_) | I32Load(_) | I64Load(_)
         | F32Load(_) | F64Load(_) | I32Load8s(_) | I32Load8u(_) | I32Load16s(_) | I32Load16u(_)

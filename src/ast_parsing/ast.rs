@@ -11,7 +11,7 @@ pub trait AstWalker<'a> {
     type WalkResult;
     fn handle_module(&mut self, _module: &Module) {}
     fn handle_fields(&mut self, _fields: &[ModuleField]) {}
-    fn start_handle_func(&mut self, _func: &Func) {}
+    fn start_handle_func(&mut self, _func: &'a Func) {}
     fn handle_func_type(&mut self, _func_type: &'a FunctionType) {}
     fn handle_func_instructions(&mut self, _instructions: &'a [Instruction]) {}
     fn finish_and_build_result(&mut self) -> Self::WalkResult;

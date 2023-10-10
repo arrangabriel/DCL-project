@@ -6,7 +6,7 @@ use crate::ast_parsing::ast::{walk_ast, AstWalker};
 
 /// Print a wasm module
 pub fn pretty_print_ast(ast: &Wat) {
-    walk_ast(ast, Box::new(AstPrettyFormatter::new()));
+    walk_ast(ast, Box::new(AstPrettyFormatter::new()))
 }
 
 struct AstPrettyFormatter {
