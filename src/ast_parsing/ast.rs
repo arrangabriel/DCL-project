@@ -1,4 +1,6 @@
-use wast::core::{Func, FuncKind, FunctionType, Instruction, Module, ModuleField, ModuleKind};
+use wast::core::{
+    Func, FuncKind, FunctionType, Instruction, Memory, Module, ModuleField, ModuleKind,
+};
 use wast::Wat;
 
 /// Implementers may themselves decide on the granularity of ast they want to handle.
@@ -14,6 +16,7 @@ pub trait AstWalker<'a> {
     fn start_handle_func(&mut self, _func: &'a Func) {}
     fn handle_func_type(&mut self, _func_type: &'a FunctionType) {}
     fn handle_func_instructions(&mut self, _instructions: &'a [Instruction]) {}
+    fn handle_memory(&mut self, _memory: &'a Memory) {}
     fn finish_and_build_result(&mut self) -> Self::WalkResult;
 }
 
@@ -48,7 +51,9 @@ pub fn walk_ast<'a, T: 'a>(
                             ModuleField::Rec(_) => {}
                             ModuleField::Import(_) => {}
                             ModuleField::Table(_) => {}
-                            ModuleField::Memory(_) => {}
+                            ModuleField::Memory(memory) => {
+                                ast_walker.handle_memory(memory);
+                            }
                             ModuleField::Global(_) => {}
                             ModuleField::Export(_) => {}
                             ModuleField::Start(_) => {}
