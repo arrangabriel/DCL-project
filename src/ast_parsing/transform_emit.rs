@@ -5,13 +5,15 @@ use wast::core::{Func, Instruction, Memory, Module};
 use wast::Wat;
 
 use crate::ast_parsing::ast::{walk_ast, AstWalker};
-use crate::instruction_analysis::{
+use crate::ast_parsing::instruction_analysis::{
     get_instruction_type, DataType, InstructionType, MemoryInstructionType,
 };
 
 // This result might have to be variable
 const TRANSACTION_FUNCTION_SIGNATURE: &str =
     "(param $tx i32) (param $utx i32) (param $state i32) (result i32)";
+const ADDRESS_LOCAL_NAME: &str = "memory_address";
+const VALUE_LOCAL_NAME: &str = "value_to_store";
 const INSTRUCTION_INDENT: usize = 2;
 const FUNCTION_INDENT: usize = 1;
 
@@ -66,7 +68,11 @@ impl<'a> ModuleTransformer<'a> {
         self.writeln(&section_text, indent)
     }
 
-    fn emit_function_split(&mut self, culprit_instruction: MemoryInstructionType) {
+    fn emit_function_split(
+        &mut self,
+        culprit_instruction: MemoryInstructionType,
+        next_instructions: &'_ [Instruction],
+    ) {
         self.current_split_index += 1;
 
         let new_func_name = format!(
@@ -77,9 +83,11 @@ impl<'a> ModuleTransformer<'a> {
         let new_func_signature = format!("(func {new_func_name} {TRANSACTION_FUNCTION_SIGNATURE}",);
 
         match culprit_instruction {
-            MemoryInstructionType::Load(_) => self.emit_load_split(&new_func_signature),
+            MemoryInstructionType::Load(_) => {
+                self.emit_load_split(&new_func_signature, next_instructions);
+            }
             MemoryInstructionType::Store(data_type) => {
-                self.emit_store_split(&new_func_signature, data_type)
+                self.emit_store_split(&new_func_signature, next_instructions, data_type);
             }
             MemoryInstructionType::OtherMem => {
                 unimplemented!(
@@ -92,14 +100,20 @@ impl<'a> ModuleTransformer<'a> {
         self.split_function_names.push(new_func_name);
     }
 
-    fn emit_load_split(&mut self, new_func_signature: &str) {
+    fn emit_load_split(&mut self, new_func_signature: &str, next_instructions: &'_ [Instruction]) {
         // current stack state should be [.., address]
         // --PRE-SPLIT--
-        self.writeln("local.set $address", INSTRUCTION_INDENT);
+        self.writeln(
+            &format!("local.set ${ADDRESS_LOCAL_NAME}"),
+            INSTRUCTION_INDENT,
+        );
         // get the base address of utx->addrs
         self.emit_get_utx();
 
-        self.writeln("local.get $address", INSTRUCTION_INDENT);
+        self.writeln(
+            &format!("local.get ${ADDRESS_LOCAL_NAME}"),
+            INSTRUCTION_INDENT,
+        );
         // store address for load instruction
         self.writeln("i32.store", INSTRUCTION_INDENT);
 
@@ -110,13 +124,19 @@ impl<'a> ModuleTransformer<'a> {
 
         // --POST-SPLIT--
         self.writeln(&new_func_signature, FUNCTION_INDENT);
+        self.emit_locals_if_necessary(next_instructions);
 
         // load address from utx->addrs[0]
         self.emit_get_utx();
         self.writeln("i32.load", INSTRUCTION_INDENT);
     }
 
-    fn emit_store_split(&mut self, new_func_signature: &str, data_type: DataType) {
+    fn emit_store_split(
+        &mut self,
+        new_func_signature: &str,
+        next_instructions: &'_ [Instruction],
+        data_type: DataType,
+    ) {
         let data_type = data_type.as_str();
         // current stack state should be (rightmost is top) [.., address, value]
         // --PRE-SPLIT--
@@ -124,18 +144,30 @@ impl<'a> ModuleTransformer<'a> {
         // (value, address) -> (address, value)
 
         // save value to be stored in $value
-        self.writeln("local.set $value", INSTRUCTION_INDENT);
+        self.writeln(
+            &format!("local.set ${VALUE_LOCAL_NAME}"),
+            INSTRUCTION_INDENT,
+        );
         // save address to store at in $address
-        self.writeln("local.set $address", INSTRUCTION_INDENT);
+        self.writeln(
+            &format!("local.set ${ADDRESS_LOCAL_NAME}"),
+            INSTRUCTION_INDENT,
+        );
 
         // get the base address of state
         self.emit_get_state();
-        self.writeln("local.get $value", INSTRUCTION_INDENT);
+        self.writeln(
+            &format!("local.get ${VALUE_LOCAL_NAME}"),
+            INSTRUCTION_INDENT,
+        );
         // store value for store instruction
         self.writeln(&format!("{data_type}.store"), INSTRUCTION_INDENT);
         // get the base address of utx->addrs
         self.emit_get_utx();
-        self.writeln("local.get $address", INSTRUCTION_INDENT);
+        self.writeln(
+            &format!("local.get ${ADDRESS_LOCAL_NAME}"),
+            INSTRUCTION_INDENT,
+        );
         // store address for load instruction
         self.writeln("i32.store", INSTRUCTION_INDENT);
 
@@ -145,6 +177,8 @@ impl<'a> ModuleTransformer<'a> {
         self.writeln(")", FUNCTION_INDENT);
         // --POST-SPLIT--
         self.writeln(&new_func_signature, FUNCTION_INDENT);
+        self.emit_locals_if_necessary(next_instructions);
+
         // load address from utx->addrs[0]
         self.emit_get_utx();
         self.writeln(
@@ -164,7 +198,7 @@ impl<'a> ModuleTransformer<'a> {
         self.writeln("local.get $state", INSTRUCTION_INDENT);
     }
 
-    fn get_instruction_string(&self, instruction_number: usize) -> String {
+    fn instruction_in_current_function_as_str(&self, instruction_number: usize) -> String {
         let instruction_reference = self
             .current_func
             .and_then(|func| {
@@ -176,6 +210,38 @@ impl<'a> ModuleTransformer<'a> {
             .trim();
 
         String::from(instruction_reference)
+    }
+
+    fn emit_locals_if_necessary(&mut self, instructions: &'_ [Instruction]) {
+        if let Some(instruction_type) = instructions
+            .iter()
+            .map(get_instruction_type)
+            .find(InstructionType::is_mem_access_instruction)
+            .and_then(|instruction_type| match instruction_type {
+                InstructionType::Memory(memory_instruction_type) => Some(memory_instruction_type),
+                InstructionType::Benign => None,
+            })
+        {
+            match instruction_type {
+                MemoryInstructionType::Load(_) => {
+                    self.writeln(
+                        &format!("(local ${ADDRESS_LOCAL_NAME} i32)"),
+                        INSTRUCTION_INDENT,
+                    );
+                }
+                MemoryInstructionType::Store(data_type) => {
+                    self.writeln(
+                        &format!("(local ${ADDRESS_LOCAL_NAME} i32)"),
+                        INSTRUCTION_INDENT,
+                    );
+                    self.writeln(
+                        &format!("(local ${VALUE_LOCAL_NAME} {})", data_type.as_str()),
+                        INSTRUCTION_INDENT,
+                    );
+                }
+                MemoryInstructionType::OtherMem => {}
+            }
+        };
     }
 }
 
@@ -202,39 +268,15 @@ impl<'a> AstWalker<'a> for ModuleTransformer<'a> {
     }
 
     fn handle_func_instructions(&mut self, instructions: &'_ [Instruction]) {
-        if let Some(instruction_type) = instructions
-            .iter()
-            .map(get_instruction_type)
-            .find(InstructionType::is_mem_access_instruction)
-            .and_then(|instruction_type| match instruction_type {
-                InstructionType::Memory(memory_instruction_type) => Some(memory_instruction_type),
-                InstructionType::Benign => None,
-            })
-        {
-            match instruction_type {
-                MemoryInstructionType::Load(_) => {
-                    self.writeln("(local $address i32)", INSTRUCTION_INDENT);
-                }
-                MemoryInstructionType::Store(data_type) => {
-                    self.writeln("(local $address i32)", INSTRUCTION_INDENT);
-                    self.writeln(
-                        &format!("(local $value {})", data_type.as_str()),
-                        INSTRUCTION_INDENT,
-                    );
-                }
-                MemoryInstructionType::OtherMem => {}
-            }
-        };
+        self.emit_locals_if_necessary(instructions);
 
         for (i, instruction) in instructions.iter().enumerate() {
             if let InstructionType::Memory(instruction_type) = get_instruction_type(instruction) {
-                self.emit_function_split(instruction_type);
+                self.emit_function_split(instruction_type, &instructions[(i + 1)..]);
             }
-            self.writeln(&self.get_instruction_string(i), 2);
+            self.writeln(&self.instruction_in_current_function_as_str(i), 2);
         }
 
-        // This might not always be correct
-        self.writeln("i32.const 0", INSTRUCTION_INDENT);
         self.writeln(")", 1);
     }
 

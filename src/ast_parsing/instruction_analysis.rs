@@ -32,7 +32,7 @@ impl DataType {
     pub fn as_str(&self) -> &str {
         match self {
             DataType::I32 => "i32",
-            DataType::I64 => "i63",
+            DataType::I64 => "i64",
             DataType::F32 => "f32",
             DataType::F64 => "f64",
         }

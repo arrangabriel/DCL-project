@@ -1,3 +1,4 @@
+pub use instruction_analysis::*;
 pub use pretty_print::pretty_print_ast;
 pub use transform_emit::transform_emit_ast;
 
