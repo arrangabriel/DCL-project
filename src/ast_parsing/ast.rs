@@ -13,6 +13,7 @@ pub trait AstWalker<'a> {
     type WalkResult;
     fn handle_module(&mut self, _module: &Module) {}
     fn handle_fields(&mut self, _fields: &[ModuleField]) {}
+    fn handle_func(&mut self, _func: &'a Func, _instructions: &'a [Instruction]) {}
     fn start_handle_func(&mut self, _func: &'a Func) {}
     fn handle_func_type(&mut self, _func_type: &'a FunctionType) {}
     fn handle_func_instructions(&mut self, _instructions: &'a [Instruction]) {}
@@ -43,6 +44,7 @@ pub fn walk_ast<'a, T: 'a>(
                                         expression,
                                     } => {
                                         ast_walker.handle_func_instructions(&expression.instrs);
+                                        ast_walker.handle_func(func, &expression.instrs);
                                     }
                                     FuncKind::Import(_) => {}
                                 }
@@ -51,9 +53,7 @@ pub fn walk_ast<'a, T: 'a>(
                             ModuleField::Rec(_) => {}
                             ModuleField::Import(_) => {}
                             ModuleField::Table(_) => {}
-                            ModuleField::Memory(memory) => {
-                                ast_walker.handle_memory(memory);
-                            }
+                            ModuleField::Memory(memory) => ast_walker.handle_memory(memory),
                             ModuleField::Global(_) => {}
                             ModuleField::Export(_) => {}
                             ModuleField::Start(_) => {}

@@ -12,11 +12,13 @@ use crate::ast_parsing::instruction_analysis::{
 // This result might have to be variable
 const TRANSACTION_FUNCTION_SIGNATURE: &str =
     "(param $tx i32) (param $utx i32) (param $state i32) (result i32)";
+const IGNORE_FUNC_PREFIX: &str = "__";
 const ADDRESS_LOCAL_NAME: &str = "memory_address";
 const VALUE_LOCAL_NAME: &str = "value_to_store";
 const INSTRUCTION_INDENT: usize = 2;
 const FUNCTION_INDENT: usize = 1;
 const MODULE_INDENT: usize = 0;
+const INDENTATION_STR: &str = "    ";
 
 pub fn transform_emit_ast(ast: &Wat, raw_text: &str, writer: Box<dyn Write>) {
     walk_ast(ast, Box::new(ModuleTransformer::new(raw_text, writer)))
@@ -44,11 +46,7 @@ impl<'a> ModuleTransformer<'a> {
     }
 
     fn writeln(&mut self, text: &str, indent: usize) {
-        self.write(&format!("{text}\n"), indent);
-    }
-
-    fn write(&mut self, text: &str, indent: usize) {
-        let formatted_text = format!("{}{}", "  ".repeat(indent), text);
+        let formatted_text = format!("{}{}\n", INDENTATION_STR.repeat(indent), text);
         self.output_writer
             .write(formatted_text.as_ref())
             .expect("Could not write");
@@ -115,7 +113,7 @@ impl<'a> ModuleTransformer<'a> {
         // return table index for next function
         let table_index = self.split_function_names.len();
         self.writeln(&format!("i32.const {table_index}"), INSTRUCTION_INDENT);
-        self.writeln(")", FUNCTION_INDENT);
+        self.emit_end_expression(FUNCTION_INDENT);
 
         // --POST-SPLIT--
         self.writeln(&new_func_signature, FUNCTION_INDENT);
@@ -169,7 +167,7 @@ impl<'a> ModuleTransformer<'a> {
         // return table index for next function
         let table_index = self.split_function_names.len();
         self.writeln(&format!("i32.const {table_index}"), INSTRUCTION_INDENT);
-        self.writeln(")", FUNCTION_INDENT);
+        self.emit_end_expression(FUNCTION_INDENT);
         // --POST-SPLIT--
         self.writeln(&new_func_signature, FUNCTION_INDENT);
         self.emit_locals_if_necessary(next_instructions);
@@ -252,11 +250,34 @@ impl<'a> ModuleTransformer<'a> {
     fn emit_current_func_signature(&mut self) {
         self.writeln(
             &format!(
-                "(func {} {TRANSACTION_FUNCTION_SIGNATURE}",
+                "(func ${} {TRANSACTION_FUNCTION_SIGNATURE}",
                 self.current_func_base_name
             ),
             FUNCTION_INDENT,
         );
+    }
+
+    /// Emits all the text from the given offset until the closing parenthesis of the section.
+    fn emit_section(&mut self, from: usize, indent: usize) {
+        let mut paren_count = 0;
+        let mut to = None;
+        let text_to_search = &self.raw_text[from - 1..];
+        for (i, c) in text_to_search.chars().enumerate() {
+            paren_count += match c {
+                '(' => 1,
+                ')' => -1,
+                _ => 0,
+            };
+            if paren_count == 0 {
+                to = Some(i);
+                break;
+            }
+        }
+        if let Some(i) = to {
+            self.writeln(&text_to_search[..=i], indent);
+        } else {
+            panic!("Malformed file, unbalanced parenthesis");
+        }
     }
 }
 
@@ -266,17 +287,20 @@ impl<'a> AstWalker<'a> for ModuleTransformer<'a> {
         self.emit_from(module.span.offset(), "\n", 0, "");
     }
 
-    fn start_handle_func(&mut self, func: &'a Func) {
-        self.current_func = Some(func);
+    fn handle_func(&mut self, func: &'a Func, instructions: &'a [Instruction]) {
         self.current_func_base_name = match func.id {
             None => gen_random_func_name(),
             Some(id) => String::from(id.name()),
         };
+
+        if self.current_func_base_name.starts_with(IGNORE_FUNC_PREFIX) {
+            self.emit_section(func.span.offset(), FUNCTION_INDENT);
+            return;
+        }
+
+        self.current_func = Some(func);
         self.current_split_index = 0;
         self.emit_current_func_signature();
-    }
-
-    fn handle_func_instructions(&mut self, instructions: &'_ [Instruction]) {
         self.emit_locals_if_necessary(instructions);
         for (i, instruction) in instructions.iter().enumerate() {
             if let InstructionType::Memory(instruction_type) = get_instruction_type(instruction) {

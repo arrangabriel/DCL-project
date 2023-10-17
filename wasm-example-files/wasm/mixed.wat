@@ -21,5 +21,15 @@
         i32.const 0
     )
 
+    (func $__ignore_me (param i64)
+        i32.const 100
+        i32.load
+        i64.const 5
+        i64.const 10
+        i64.add
+        i64.store
+        i32.const 0
+    )
+
     (memory 10)
 )
