@@ -16,6 +16,7 @@ const ADDRESS_LOCAL_NAME: &str = "memory_address";
 const VALUE_LOCAL_NAME: &str = "value_to_store";
 const INSTRUCTION_INDENT: usize = 2;
 const FUNCTION_INDENT: usize = 1;
+const MODULE_INDENT: usize = 0;
 
 pub fn transform_emit_ast(ast: &Wat, raw_text: &str, writer: Box<dyn Write>) {
     walk_ast(ast, Box::new(ModuleTransformer::new(raw_text, writer)))
@@ -53,13 +54,7 @@ impl<'a> ModuleTransformer<'a> {
             .expect("Could not write");
     }
 
-    fn emit_section(
-        &mut self,
-        offset: usize,
-        ending_delimiter: &str,
-        indent: usize,
-        postfix: &str,
-    ) {
+    fn emit_from(&mut self, offset: usize, ending_delimiter: &str, indent: usize, postfix: &str) {
         let section_text = &self.raw_text[offset - 1..];
         let section_end = section_text[1..]
             .find(ending_delimiter)
@@ -198,8 +193,12 @@ impl<'a> ModuleTransformer<'a> {
         self.writeln("local.get $state", INSTRUCTION_INDENT);
     }
 
-    fn instruction_in_current_function_as_str(&self, instruction_number: usize) -> String {
-        let instruction_reference = self
+    fn emit_end_expression(&mut self, indent: usize) {
+        self.writeln(")", indent);
+    }
+
+    fn emit_instruction_in_current_function(&mut self, instruction_number: usize) {
+        let instruction_str = self
             .current_func
             .and_then(|func| {
                 self.raw_text[func.span.offset()..]
@@ -209,82 +208,34 @@ impl<'a> ModuleTransformer<'a> {
             .unwrap_or("")
             .trim();
 
-        String::from(instruction_reference)
+        self.writeln(instruction_str, INSTRUCTION_INDENT);
     }
 
+    /// Check the instruction-stream to see if any locals will be needed for stack-juggling.
+    /// If so, emit them.
     fn emit_locals_if_necessary(&mut self, instructions: &'_ [Instruction]) {
-        if let Some(instruction_type) = instructions
-            .iter()
-            .map(get_instruction_type)
-            .find(InstructionType::is_mem_access_instruction)
-            .and_then(|instruction_type| match instruction_type {
-                InstructionType::Memory(memory_instruction_type) => Some(memory_instruction_type),
-                InstructionType::Benign => None,
-            })
-        {
-            match instruction_type {
-                MemoryInstructionType::Load(_) => {
-                    self.writeln(
-                        &format!("(local ${ADDRESS_LOCAL_NAME} i32)"),
-                        INSTRUCTION_INDENT,
-                    );
-                }
-                MemoryInstructionType::Store(data_type) => {
-                    self.writeln(
-                        &format!("(local ${ADDRESS_LOCAL_NAME} i32)"),
-                        INSTRUCTION_INDENT,
-                    );
-                    self.writeln(
-                        &format!("(local ${VALUE_LOCAL_NAME} {})", data_type.as_str()),
-                        INSTRUCTION_INDENT,
-                    );
-                }
-                MemoryInstructionType::OtherMem => {}
+        on_next_mem_instruction(instructions, |instruction_type| match instruction_type {
+            MemoryInstructionType::Load(_) => {
+                self.writeln(
+                    &format!("(local ${ADDRESS_LOCAL_NAME} i32)"),
+                    INSTRUCTION_INDENT,
+                );
             }
-        };
-    }
-}
-
-impl<'a> AstWalker<'a> for ModuleTransformer<'a> {
-    type WalkResult = ();
-    fn handle_module(&mut self, module: &Module) {
-        self.emit_section(module.span.offset(), "\n", 0, "");
-    }
-
-    fn start_handle_func(&mut self, func: &'a Func) {
-        let (func_name, postfix) = match func.id {
-            Some(id) => (String::from(id.name()), String::default()),
-            None => {
-                let new_name = gen_random_func_name();
-                let postfix = format!(" {}", &new_name);
-                (new_name, postfix)
+            MemoryInstructionType::Store(data_type) => {
+                self.writeln(
+                    &format!("(local ${ADDRESS_LOCAL_NAME} i32)"),
+                    INSTRUCTION_INDENT,
+                );
+                self.writeln(
+                    &format!("(local ${VALUE_LOCAL_NAME} {})", data_type.as_str()),
+                    INSTRUCTION_INDENT,
+                );
             }
-        };
-
-        self.current_func = Some(func);
-        self.current_func_base_name = func_name;
-        self.current_split_index = 0;
-        self.emit_section(func.span.offset(), "\n", 1, &postfix);
+            MemoryInstructionType::OtherMem => {}
+        });
     }
 
-    fn handle_func_instructions(&mut self, instructions: &'_ [Instruction]) {
-        self.emit_locals_if_necessary(instructions);
-
-        for (i, instruction) in instructions.iter().enumerate() {
-            if let InstructionType::Memory(instruction_type) = get_instruction_type(instruction) {
-                self.emit_function_split(instruction_type, &instructions[(i + 1)..]);
-            }
-            self.writeln(&self.instruction_in_current_function_as_str(i), 2);
-        }
-
-        self.writeln(")", 1);
-    }
-
-    fn handle_memory(&mut self, memory: &'a Memory) {
-        self.emit_section(memory.span.offset(), "\n", 1, "");
-    }
-
-    fn finish_and_build_result(&mut self) -> Self::WalkResult {
+    fn emit_funcref_table(&mut self) {
         if self.split_function_names.len() > 0 {
             self.writeln(
                 &format!("(table {} funcref)", self.split_function_names.len()),
@@ -296,9 +247,53 @@ impl<'a> AstWalker<'a> for ModuleTransformer<'a> {
                 FUNCTION_INDENT,
             );
         }
+    }
 
-        self.writeln(")", 0);
-        ()
+    fn emit_current_func_signature(&mut self) {
+        self.writeln(
+            &format!(
+                "(func {} {TRANSACTION_FUNCTION_SIGNATURE}",
+                self.current_func_base_name
+            ),
+            FUNCTION_INDENT,
+        );
+    }
+}
+
+impl<'a> AstWalker<'a> for ModuleTransformer<'a> {
+    type WalkResult = ();
+    fn handle_module(&mut self, module: &Module) {
+        self.emit_from(module.span.offset(), "\n", 0, "");
+    }
+
+    fn start_handle_func(&mut self, func: &'a Func) {
+        self.current_func = Some(func);
+        self.current_func_base_name = match func.id {
+            None => gen_random_func_name(),
+            Some(id) => String::from(id.name()),
+        };
+        self.current_split_index = 0;
+        self.emit_current_func_signature();
+    }
+
+    fn handle_func_instructions(&mut self, instructions: &'_ [Instruction]) {
+        self.emit_locals_if_necessary(instructions);
+        for (i, instruction) in instructions.iter().enumerate() {
+            if let InstructionType::Memory(instruction_type) = get_instruction_type(instruction) {
+                self.emit_function_split(instruction_type, &instructions[(i + 1)..]);
+            }
+            self.emit_instruction_in_current_function(i);
+        }
+        self.emit_end_expression(FUNCTION_INDENT);
+    }
+
+    fn handle_memory(&mut self, memory: &'a Memory) {
+        self.emit_from(memory.span.offset(), "\n", 1, "");
+    }
+
+    fn finish_and_build_result(&mut self) -> Self::WalkResult {
+        self.emit_funcref_table();
+        self.emit_end_expression(MODULE_INDENT);
     }
 }
 
@@ -309,4 +304,21 @@ fn gen_random_func_name() -> String {
         .map(char::from)
         .collect();
     format!("funcid_{rand_id}")
+}
+
+fn on_next_mem_instruction<F>(instructions: &'_ [Instruction], mut f: F)
+where
+    F: FnMut(MemoryInstructionType) -> (),
+{
+    if let Some(instruction_type) = instructions
+        .iter()
+        .map(get_instruction_type)
+        .find(InstructionType::is_mem_access_instruction)
+        .and_then(|instruction_type| match instruction_type {
+            InstructionType::Memory(memory_instruction_type) => Some(memory_instruction_type),
+            InstructionType::Benign => None,
+        })
+    {
+        f(instruction_type);
+    };
 }
