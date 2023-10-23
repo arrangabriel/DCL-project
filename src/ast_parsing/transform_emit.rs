@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use rand::{distributions::Alphanumeric, Rng};
-use wast::core::{Func, Instruction, Memory, Module};
+use wast::core::{Export, Func, Instruction, Type};
 use wast::Wat;
 
 use crate::ast_parsing::ast::{walk_ast, AstWalker};
@@ -11,12 +11,12 @@ use crate::ast_parsing::instruction_analysis::{
 
 // This result might have to be variable
 const TRANSACTION_FUNCTION_SIGNATURE: &str =
-    "(param $tx i32) (param $utx i32) (param $state i32) (result i32)";
+    "(type $utx_f) (param $tx i32) (param $utx i32) (param $state i32) (result i32)";
 const IGNORE_FUNC_PREFIX: &str = "__";
 const ADDRESS_LOCAL_NAME: &str = "memory_address";
 const VALUE_LOCAL_NAME: &str = "value_to_store";
 const INSTRUCTION_INDENT: usize = 2;
-const FUNCTION_INDENT: usize = 1;
+const MODULE_MEMBER_INDENT: usize = 1;
 const MODULE_INDENT: usize = 0;
 const INDENTATION_STR: &str = "    ";
 
@@ -30,7 +30,7 @@ struct ModuleTransformer<'a> {
     current_func: Option<&'a Func<'a>>,
     current_func_base_name: String,
     current_split_index: u8,
-    split_function_names: Vec<String>,
+    utx_function_names: Vec<String>,
 }
 
 impl<'a> ModuleTransformer<'a> {
@@ -41,7 +41,7 @@ impl<'a> ModuleTransformer<'a> {
             current_func: None,
             current_func_base_name: String::default(),
             current_split_index: 0,
-            split_function_names: Vec::default(),
+            utx_function_names: Vec::default(),
         }
     }
 
@@ -52,28 +52,20 @@ impl<'a> ModuleTransformer<'a> {
             .expect("Could not write");
     }
 
-    fn emit_from(&mut self, offset: usize, ending_delimiter: &str, indent: usize, postfix: &str) {
-        let section_text = &self.raw_text[offset - 1..];
-        let section_end = section_text[1..]
-            .find(ending_delimiter)
-            .expect("Could not find next section start");
-        let section_text = format!("{}{}", &section_text[..=section_end], postfix);
-        self.writeln(&section_text, indent)
-    }
-
     fn emit_function_split(
         &mut self,
         culprit_instruction: MemoryInstructionType,
         next_instructions: &'_ [Instruction],
-    ) {
+    ) -> String {
         self.current_split_index += 1;
 
         let new_func_name = format!(
-            "${}_{}",
+            "{}_{}",
             self.current_func_base_name, self.current_split_index
         );
 
-        let new_func_signature = format!("(func {new_func_name} {TRANSACTION_FUNCTION_SIGNATURE}",);
+        let new_func_signature =
+            format!("(func ${new_func_name} {TRANSACTION_FUNCTION_SIGNATURE}",);
 
         match culprit_instruction {
             MemoryInstructionType::Load(_) => {
@@ -90,7 +82,7 @@ impl<'a> ModuleTransformer<'a> {
             }
         }
 
-        self.split_function_names.push(new_func_name);
+        new_func_name
     }
 
     fn emit_load_split(&mut self, new_func_signature: &str, next_instructions: &'_ [Instruction]) {
@@ -102,7 +94,6 @@ impl<'a> ModuleTransformer<'a> {
         );
         // get the base address of utx->addrs
         self.emit_get_utx();
-
         self.writeln(
             &format!("local.get ${ADDRESS_LOCAL_NAME}"),
             INSTRUCTION_INDENT,
@@ -110,13 +101,17 @@ impl<'a> ModuleTransformer<'a> {
         // store address for load instruction
         self.writeln("i32.store", INSTRUCTION_INDENT);
 
+        self.emit_get_utx();
+        self.writeln("i32.const 1", INSTRUCTION_INDENT);
+        self.writeln("i32.store8 offset=63", INSTRUCTION_INDENT);
+
         // return table index for next function
-        let table_index = self.split_function_names.len();
+        let table_index = self.utx_function_names.len();
         self.writeln(&format!("i32.const {table_index}"), INSTRUCTION_INDENT);
-        self.emit_end_expression(FUNCTION_INDENT);
+        self.emit_end_expression(MODULE_MEMBER_INDENT);
 
         // --POST-SPLIT--
-        self.writeln(&new_func_signature, FUNCTION_INDENT);
+        self.writeln(&new_func_signature, MODULE_MEMBER_INDENT);
         self.emit_locals_if_necessary(next_instructions);
 
         // load address from utx->addrs[0]
@@ -164,12 +159,16 @@ impl<'a> ModuleTransformer<'a> {
         // store address for load instruction
         self.writeln("i32.store", INSTRUCTION_INDENT);
 
+        self.emit_get_utx();
+        self.writeln("i32.const 1", INSTRUCTION_INDENT);
+        self.writeln("i32.store8 offset=63", INSTRUCTION_INDENT);
+
         // return table index for next function
-        let table_index = self.split_function_names.len();
+        let table_index = self.utx_function_names.len();
         self.writeln(&format!("i32.const {table_index}"), INSTRUCTION_INDENT);
-        self.emit_end_expression(FUNCTION_INDENT);
+        self.emit_end_expression(MODULE_MEMBER_INDENT);
         // --POST-SPLIT--
-        self.writeln(&new_func_signature, FUNCTION_INDENT);
+        self.writeln(&new_func_signature, MODULE_MEMBER_INDENT);
         self.emit_locals_if_necessary(next_instructions);
 
         // load address from utx->addrs[0]
@@ -183,19 +182,7 @@ impl<'a> ModuleTransformer<'a> {
         self.writeln(&format!("{data_type}.load"), INSTRUCTION_INDENT);
     }
 
-    fn emit_get_utx(&mut self) {
-        self.writeln("local.get $utx", INSTRUCTION_INDENT);
-    }
-
-    fn emit_get_state(&mut self) {
-        self.writeln("local.get $state", INSTRUCTION_INDENT);
-    }
-
-    fn emit_end_expression(&mut self, indent: usize) {
-        self.writeln(")", indent);
-    }
-
-    fn emit_instruction_in_current_function(&mut self, instruction_number: usize) {
+    fn emit_instruction_from_current_function(&mut self, instruction_number: usize) {
         let instruction_str = self
             .current_func
             .and_then(|func| {
@@ -234,15 +221,22 @@ impl<'a> ModuleTransformer<'a> {
     }
 
     fn emit_funcref_table(&mut self) {
-        if self.split_function_names.len() > 0 {
+        if self.utx_function_names.len() > 0 {
             self.writeln(
-                &format!("(table {} funcref)", self.split_function_names.len()),
-                FUNCTION_INDENT,
+                &format!("(table {} funcref)", self.utx_function_names.len()),
+                MODULE_MEMBER_INDENT,
             );
-            let joined_names = self.split_function_names.join(" ");
+
+            let joined_names = self
+                .utx_function_names
+                .iter()
+                .map(|name| format!("${name}"))
+                .collect::<Vec<String>>()
+                .join(" ");
+
             self.writeln(
                 &format!("(elem (i32.const 0) {})", &joined_names),
-                FUNCTION_INDENT,
+                MODULE_MEMBER_INDENT,
             );
         }
     }
@@ -253,8 +247,28 @@ impl<'a> ModuleTransformer<'a> {
                 "(func ${} {TRANSACTION_FUNCTION_SIGNATURE}",
                 self.current_func_base_name
             ),
-            FUNCTION_INDENT,
+            MODULE_MEMBER_INDENT,
         );
+    }
+
+    fn emit_end_expression(&mut self, indent: usize) {
+        self.writeln(")", indent);
+    }
+
+    fn emit_memory(&mut self) {
+        self.writeln("(memory 10)", MODULE_MEMBER_INDENT);
+    }
+
+    fn emit_module_start(&mut self) {
+        self.writeln("(module", MODULE_INDENT);
+    }
+
+    fn emit_get_utx(&mut self) {
+        self.writeln("local.get $utx", INSTRUCTION_INDENT);
+    }
+
+    fn emit_get_state(&mut self) {
+        self.writeln("local.get $state", INSTRUCTION_INDENT);
     }
 
     /// Emits all the text from the given offset until the closing parenthesis of the section.
@@ -283,20 +297,24 @@ impl<'a> ModuleTransformer<'a> {
 
 impl<'a> AstWalker<'a> for ModuleTransformer<'a> {
     type WalkResult = ();
-    fn handle_module(&mut self, module: &Module) {
-        self.emit_from(module.span.offset(), "\n", 0, "");
+    fn setup(&mut self) {
+        self.emit_module_start();
     }
 
     fn handle_func(&mut self, func: &'a Func, instructions: &'a [Instruction]) {
-        self.current_func_base_name = match func.id {
+        let new_basename = match func.id.map(|id| id.name()) {
             None => gen_random_func_name(),
-            Some(id) => String::from(id.name()),
+            Some(func_name) => {
+                if func_name.starts_with(IGNORE_FUNC_PREFIX) {
+                    self.emit_section(func.span.offset(), MODULE_MEMBER_INDENT);
+                    return;
+                }
+                func_name.into()
+            }
         };
 
-        if self.current_func_base_name.starts_with(IGNORE_FUNC_PREFIX) {
-            self.emit_section(func.span.offset(), FUNCTION_INDENT);
-            return;
-        }
+        self.utx_function_names.push(new_basename.clone());
+        self.current_func_base_name = new_basename;
 
         self.current_func = Some(func);
         self.current_split_index = 0;
@@ -304,18 +322,25 @@ impl<'a> AstWalker<'a> for ModuleTransformer<'a> {
         self.emit_locals_if_necessary(instructions);
         for (i, instruction) in instructions.iter().enumerate() {
             if let InstructionType::Memory(instruction_type) = get_instruction_type(instruction) {
-                self.emit_function_split(instruction_type, &instructions[(i + 1)..]);
+                let split_name =
+                    self.emit_function_split(instruction_type, &instructions[(i + 1)..]);
+                self.utx_function_names.push(split_name);
             }
-            self.emit_instruction_in_current_function(i);
+            self.emit_instruction_from_current_function(i);
         }
-        self.emit_end_expression(FUNCTION_INDENT);
+        self.emit_end_expression(MODULE_MEMBER_INDENT);
     }
 
-    fn handle_memory(&mut self, memory: &'a Memory) {
-        self.emit_from(memory.span.offset(), "\n", 1, "");
+    fn handle_export(&mut self, export: &'a Export) {
+        self.emit_section(export.span.offset(), MODULE_MEMBER_INDENT);
+    }
+
+    fn handle_type(&mut self, ty: &'a Type) {
+        self.emit_section(ty.span.offset(), MODULE_MEMBER_INDENT);
     }
 
     fn finish_and_build_result(&mut self) -> Self::WalkResult {
+        self.emit_memory();
         self.emit_funcref_table();
         self.emit_end_expression(MODULE_INDENT);
     }

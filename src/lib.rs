@@ -14,10 +14,9 @@ pub fn parse_wast_string(wast_string: &str, print_ast: bool) -> Result<(), wast:
     if print_ast {
         pretty_print_ast(&wat);
         println!("\n{}\n", "-".repeat(100));
+        println!("{}", wast_string);
     }
 
-    println!("{}", wast_string);
-    println!("Split version:\n");
     let writer = io::stdout();
     transform_emit_ast(&wat, wast_string, Box::new(writer));
 

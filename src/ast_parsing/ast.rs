@@ -1,5 +1,6 @@
 use wast::core::{
-    Func, FuncKind, FunctionType, Instruction, Memory, Module, ModuleField, ModuleKind,
+    Export, Func, FuncKind, FunctionType, Instruction, Memory, Module, ModuleField, ModuleKind,
+    Type,
 };
 use wast::Wat;
 
@@ -11,6 +12,7 @@ use wast::Wat;
 /// 3. [handle_func_instructions]
 pub trait AstWalker<'a> {
     type WalkResult;
+    fn setup(&mut self) {}
     fn handle_module(&mut self, _module: &Module) {}
     fn handle_fields(&mut self, _fields: &[ModuleField]) {}
     fn handle_func(&mut self, _func: &'a Func, _instructions: &'a [Instruction]) {}
@@ -18,6 +20,8 @@ pub trait AstWalker<'a> {
     fn handle_func_type(&mut self, _func_type: &'a FunctionType) {}
     fn handle_func_instructions(&mut self, _instructions: &'a [Instruction]) {}
     fn handle_memory(&mut self, _memory: &'a Memory) {}
+    fn handle_export(&mut self, _export: &'a Export) {}
+    fn handle_type(&mut self, _ty: &'a Type) {}
     fn finish_and_build_result(&mut self) -> Self::WalkResult;
 }
 
@@ -25,6 +29,7 @@ pub fn walk_ast<'a, T: 'a>(
     wat: &'a Wat,
     mut ast_walker: Box<(dyn AstWalker<'a, WalkResult = T> + 'a)>,
 ) -> T {
+    ast_walker.setup();
     match wat {
         Wat::Module(module) => {
             ast_walker.handle_module(module);
@@ -49,13 +54,15 @@ pub fn walk_ast<'a, T: 'a>(
                                     FuncKind::Import(_) => {}
                                 }
                             }
-                            ModuleField::Type(_) => {}
+                            ModuleField::Type(ty) => {
+                                ast_walker.handle_type(ty);
+                            }
                             ModuleField::Rec(_) => {}
                             ModuleField::Import(_) => {}
                             ModuleField::Table(_) => {}
                             ModuleField::Memory(memory) => ast_walker.handle_memory(memory),
                             ModuleField::Global(_) => {}
-                            ModuleField::Export(_) => {}
+                            ModuleField::Export(export) => ast_walker.handle_export(export),
                             ModuleField::Start(_) => {}
                             ModuleField::Elem(_) => {}
                             ModuleField::Data(_) => {}
