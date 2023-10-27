@@ -10,7 +10,7 @@ use Instruction::{I32Add, I32Const, I32Mul, I32WrapI64};
 
 use DataType::*;
 
-use crate::ast_parsing::StackEffect::{Add, Binary, Remove, RemoveTwo, Unary};
+use crate::ast_parsing::utils::name_is_param;
 
 #[derive(PartialEq)]
 pub enum InstructionType {
@@ -32,15 +32,6 @@ pub enum DataType {
     F64,
 }
 
-#[derive(PartialEq)]
-pub enum StackEffect {
-    Unary(DataType),
-    Binary(DataType),
-    Add(DataType),
-    Remove,
-    RemoveTwo,
-}
-
 impl DataType {
     pub fn as_str(&self) -> &str {
         match self {
@@ -59,18 +50,40 @@ impl DataType {
     }
 }
 
+pub struct StackValue {
+    pub ty: DataType,
+    pub is_safe: bool,
+}
+
+pub struct StackEffect {
+    pub remove_n: usize,
+    pub add: Option<StackValue>,
+    pub preserves_safety: bool,
+}
+
+impl StackEffect {
+    fn new(remove_n: usize, add: Option<DataType>, is_safe: bool, preserves_safety: bool) -> Self {
+        StackEffect {
+            remove_n,
+            add: add.map(|ty| StackValue { ty, is_safe }),
+            preserves_safety,
+        }
+    }
+}
+
+/// Get a pair of operators to remove and possibly to add
 pub fn get_instruction_effect(instruction: &Instruction) -> StackEffect {
     match instruction {
         Instruction::LocalGet(index) => match index {
             Index::Num(_, _) => panic!("Unsupported num index"),
-            Index::Id(_) => Add(I32),
+            Index::Id(id) => StackEffect::new(0, Some(I32), name_is_param(id.name()), true),
         },
-        I64Load(_) => Binary(I64),
-        I32WrapI64 => Unary(I32),
-        I32Const(_) => Add(I32),
-        I32Mul | I32Add | I32Load(_) => Binary(I32),
-        I32Store(_) | I32Store8(_) => RemoveTwo,
-        Drop => Remove,
+        I64Load(_) => StackEffect::new(1, Some(I64), false, false),
+        I32WrapI64 => StackEffect::new(1, Some(I32), false, true),
+        I32Const(_) => StackEffect::new(0, Some(I32), false, false),
+        I32Mul | I32Add | I32Load(_) => StackEffect::new(2, Some(I32), false, false),
+        I32Store(_) | I32Store8(_) => StackEffect::new(2, None, false, false),
+        Drop => StackEffect::new(1, None, false, false),
         _ => panic!("Unsupported instruction read - {:?}", instruction),
     }
 }

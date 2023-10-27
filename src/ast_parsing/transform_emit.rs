@@ -4,15 +4,22 @@ use wast::core::{Export, Func, Instruction, Type};
 use wast::Wat;
 
 use crate::ast_parsing::ast::{walk_ast, AstWalker};
-use crate::ast_parsing::instruction_analysis::{get_instruction_type, InstructionType};
+use crate::ast_parsing::get_instruction_effect;
 use crate::ast_parsing::module_transformer::ModuleTransformer;
 use crate::ast_parsing::utils::{
     gen_random_func_name, IGNORE_FUNC_PREFIX, MODULE_INDENT, MODULE_MEMBER_INDENT,
 };
-use crate::ast_parsing::{get_instruction_effect, StackEffect};
 
-pub fn transform_emit_ast(ast: &Wat, raw_text: &str, writer: Box<dyn Write>) {
-    walk_ast(ast, Box::new(ModuleTransformer::new(raw_text, writer)))
+pub fn transform_emit_ast(
+    ast: &Wat,
+    raw_text: &str,
+    writer: Box<dyn Write>,
+    skip_safe_splits: bool,
+) {
+    walk_ast(
+        ast,
+        Box::new(ModuleTransformer::new(raw_text, writer, skip_safe_splits)),
+    )
 }
 
 impl<'a> AstWalker<'a> for ModuleTransformer<'a> {
@@ -42,30 +49,24 @@ impl<'a> AstWalker<'a> for ModuleTransformer<'a> {
         self.emit_current_func_signature();
         self.emit_locals_if_necessary(instructions);
         for (i, instruction) in instructions.iter().enumerate() {
-            if let InstructionType::Memory(instruction_type) = get_instruction_type(instruction) {
+            if let Some(instruction_type) = self.needs_split(instruction) {
                 let split_name = self.emit_function_split(instruction_type, &instructions[i + 1..]);
                 self.utx_function_names.push(split_name);
             } else {
-                match get_instruction_effect(instruction) {
-                    StackEffect::Unary(ty) => {
-                        self.current_stack.pop();
-                        self.current_stack.push(ty);
-                    }
-                    StackEffect::Binary(ty) => {
-                        self.current_stack.pop();
-                        self.current_stack.pop();
-                        self.current_stack.push(ty);
-                    }
-                    StackEffect::Add(ty) => {
-                        self.current_stack.push(ty);
-                    }
-                    StackEffect::Remove => {
-                        self.current_stack.pop();
-                    }
-                    StackEffect::RemoveTwo => {
-                        self.current_stack.pop();
-                        self.current_stack.pop();
-                    }
+                let stack_effect = get_instruction_effect(instruction);
+                let mut is_safe = false;
+                for _ in 0..stack_effect.remove_n {
+                    let stack_value = self
+                        .current_stack
+                        .pop()
+                        .expect("Unbalanced stack - input program is malformed");
+                    is_safe |= stack_effect.preserves_safety
+                        && stack_effect.remove_n == 1
+                        && stack_value.is_safe;
+                }
+                if let Some(mut stack_value) = stack_effect.add {
+                    stack_value.is_safe |= is_safe;
+                    self.current_stack.push(stack_value);
                 }
                 self.emit_instruction_from_current_function(i);
             }
@@ -81,7 +82,6 @@ impl<'a> AstWalker<'a> for ModuleTransformer<'a> {
         // Emitting the utx function type on setup breaks other function references,
         // therefore we don't emit them.
         // A possible fix is to parse the __step function
-
         //self.emit_section(ty.span.offset(), MODULE_MEMBER_INDENT);
     }
 

@@ -3,6 +3,7 @@ use rand::Rng;
 
 pub const TRANSACTION_FUNCTION_SIGNATURE: &str =
     "(type $utx_f) (param $tx i32) (param $utx i32) (param $state i32) (result i32)";
+pub const STATE_BASE_OFFSET: usize = 0;
 pub const IGNORE_FUNC_PREFIX: &str = "__";
 pub const ADDRESS_LOCAL_NAME: &str = "memory_address";
 pub const VALUE_LOCAL_NAME: &str = "value_to_store";
@@ -19,4 +20,11 @@ pub fn gen_random_func_name() -> String {
         .map(char::from)
         .collect();
     format!("funcid_{rand_id}")
+}
+
+pub fn name_is_param(name: &str) -> bool {
+    match name {
+        "tx" | "state" => true,
+        _ => false,
+    }
 }
