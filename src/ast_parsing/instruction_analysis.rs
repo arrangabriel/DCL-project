@@ -1,11 +1,16 @@
 use wast::core::Instruction;
 use wast::core::Instruction::{
-    DataDrop, ElemDrop, F32Load, F32Store, F64Load, F64Store, GlobalGet, GlobalSet, I32Load,
-    I32Load16s, I32Load16u, I32Load8s, I32Load8u, I32Store, I32Store16, I32Store8, I64Load,
-    I64Load16s, I64Load16u, I64Load32s, I64Load32u, I64Load8s, I64Load8u, I64Store, I64Store16,
-    I64Store32, I64Store8, MemoryCopy, MemoryDiscard, MemoryFill, MemoryGrow, MemoryInit,
-    MemorySize, TableCopy, TableFill, TableGet, TableGrow, TableInit, TableSet, TableSize,
+    DataDrop, Drop, ElemDrop, F32Load, F32Store, F64Load, F64Store, GlobalGet, GlobalSet, I32Load,
+    I32Store, I32Store8, I64Load, I64Store, I64Store8, MemoryCopy, MemoryDiscard, MemoryFill,
+    MemoryGrow, MemoryInit, MemorySize, TableCopy, TableFill, TableGet, TableGrow, TableInit,
+    TableSet, TableSize,
 };
+use wast::token::Index;
+use Instruction::{I32Add, I32Const, I32Mul, I32WrapI64};
+
+use DataType::*;
+
+use crate::ast_parsing::StackEffect::{Add, Binary, Remove, RemoveTwo, Unary};
 
 #[derive(PartialEq)]
 pub enum InstructionType {
@@ -15,12 +20,11 @@ pub enum InstructionType {
 
 #[derive(PartialEq)]
 pub enum MemoryInstructionType {
-    Load(DataType),
-    Store(DataType),
-    OtherMem,
+    Load { ty: DataType, offset: u64 },
+    Store { ty: DataType, offset: u64 },
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum DataType {
     I32,
     I64,
@@ -28,54 +32,77 @@ pub enum DataType {
     F64,
 }
 
+#[derive(PartialEq)]
+pub enum StackEffect {
+    Unary(DataType),
+    Binary(DataType),
+    Add(DataType),
+    Remove,
+    RemoveTwo,
+}
+
 impl DataType {
     pub fn as_str(&self) -> &str {
         match self {
-            DataType::I32 => "i32",
-            DataType::I64 => "i64",
-            DataType::F32 => "f32",
-            DataType::F64 => "f64",
+            I32 => "i32",
+            I64 => "i64",
+            F32 => "f32",
+            F64 => "f64",
+        }
+    }
+
+    pub fn size(&self) -> usize {
+        match self {
+            F32 | I32 => 4,
+            I64 | F64 => 8,
         }
     }
 }
 
-impl InstructionType {
-    pub fn is_mem_access_instruction(&self) -> bool {
-        return self != &InstructionType::Benign;
+pub fn get_instruction_effect(instruction: &Instruction) -> StackEffect {
+    match instruction {
+        Instruction::LocalGet(index) => match index {
+            Index::Num(_, _) => panic!("Unsupported num index"),
+            Index::Id(_) => Add(I32),
+        },
+        I64Load(_) => Binary(I64),
+        I32WrapI64 => Unary(I32),
+        I32Const(_) => Add(I32),
+        I32Mul | I32Add | I32Load(_) => Binary(I32),
+        I32Store(_) | I32Store8(_) => RemoveTwo,
+        Drop => Remove,
+        _ => panic!("Unsupported instruction read - {:?}", instruction),
     }
 }
 
 pub fn get_instruction_type(instruction: &Instruction) -> InstructionType {
-    if let Some(data_type) = type_from_load(instruction) {
-        InstructionType::Memory(MemoryInstructionType::Load(data_type))
-    } else if let Some(data_type) = type_from_store(instruction) {
-        InstructionType::Memory(MemoryInstructionType::Store(data_type))
+    if let Some((ty, offset)) = type_from_load(instruction) {
+        InstructionType::Memory(MemoryInstructionType::Load { ty, offset })
+    } else if let Some((ty, offset)) = type_from_store(instruction) {
+        InstructionType::Memory(MemoryInstructionType::Store { ty, offset })
     } else if is_other_memory_instruction(instruction) {
-        InstructionType::Memory(MemoryInstructionType::OtherMem)
+        panic!("Unsupported instruction read - {:?}", instruction)
     } else {
         InstructionType::Benign
     }
 }
 
-fn type_from_load(instruction: &Instruction) -> Option<DataType> {
+fn type_from_load(instruction: &Instruction) -> Option<(DataType, u64)> {
     match instruction {
-        I32Load(_) | I32Load8s(_) | I32Load8u(_) | I32Load16s(_) | I32Load16u(_) => {
-            Some(DataType::I32)
-        }
-        I64Load(_) | I64Load8s(_) | I64Load8u(_) | I64Load16s(_) | I64Load16u(_)
-        | I64Load32s(_) | I64Load32u(_) => Some(DataType::I64),
-        F32Load(_) => Some(DataType::F32),
-        F64Load(_) => Some(DataType::F64),
+        I32Load(arg) => Some((I32, arg.offset)),
+        I64Load(arg) => Some((I64, arg.offset)),
+        F32Load(arg) => Some((F32, arg.offset)),
+        F64Load(arg) => Some((F64, arg.offset)),
         _ => None,
     }
 }
 
-fn type_from_store(instruction: &Instruction) -> Option<DataType> {
+fn type_from_store(instruction: &Instruction) -> Option<(DataType, u64)> {
     match instruction {
-        I32Store(_) | I32Store8(_) | I32Store16(_) => Some(DataType::I32),
-        I64Store(_) | I64Store8(_) | I64Store16(_) | I64Store32(_) => Some(DataType::I64),
-        F32Store(_) => Some(DataType::F32),
-        F64Store(_) => Some(DataType::F64),
+        I32Store(arg) | I32Store8(arg) => Some((I32, arg.offset)),
+        I64Store(arg) | I64Store8(arg) => Some((I64, arg.offset)),
+        F32Store(arg) => Some((F32, arg.offset)),
+        F64Store(arg) => Some((F64, arg.offset)),
         _ => None,
     }
 }

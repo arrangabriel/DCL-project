@@ -3,7 +3,7 @@ use std::io;
 use wast::parser::ParseBuffer;
 use wast::{parser, Wat};
 
-use ast_parsing::{pretty_print_ast, transform_emit_ast};
+use ast_parsing::transform_emit_ast;
 
 mod ast_parsing;
 
@@ -12,8 +12,6 @@ pub fn parse_wast_string(wast_string: &str, print_ast: bool) -> Result<(), wast:
     let wat = parser::parse::<Wat>(&buffer)?;
 
     if print_ast {
-        pretty_print_ast(&wat);
-        println!("\n{}\n", "-".repeat(100));
         println!("{}", wast_string);
     }
 
