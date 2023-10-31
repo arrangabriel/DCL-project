@@ -16,7 +16,7 @@
     )
     (func $f_1 (type $utx_f) (param $tx i32) (param $utx i32) (param $state i32) (result i32)
         (local $memory_address i32)
-        (local $i32_stack_local i32)
+        (local $i32_local i32)
         local.get $utx
         i32.load
         i64.load
@@ -33,24 +33,24 @@
         local.get $utx
         i32.const 1
         i32.store8 offset=63
-        local.set $i32_stack_local
+        local.set $i32_local
         local.get $state
-        local.get $i32_stack_local
+        local.get $i32_local
         i32.store offset=0
         i32.const 3
     )
     (func $f_2 (type $utx_f) (param $tx i32) (param $utx i32) (param $state i32) (result i32)
         (local $memory_address i32)
-        (local $value_to_store i32)
+        (local $i32_local i32)
         local.get $state
         i32.load offset=0
         local.get $utx
         i32.load
         i32.load
-        local.set $value_to_store
+        local.set $i32_local
         local.set $memory_address
         local.get $state
-        local.get $value_to_store
+        local.get $i32_local
         i32.store
         local.get $utx
         local.get $memory_address

@@ -143,8 +143,9 @@ impl<'a> ModuleTransformer<'a> {
         self.current_stack.pop();
         self.current_stack.pop();
         // Convert these to macros?
-        let set_value = format!("local.set ${VALUE_LOCAL_NAME}");
-        let get_value = format!("local.get ${VALUE_LOCAL_NAME}");
+        let stack_juggler_local_name = format!("{}_{STACK_JUGGLER_NAME}", data_type.as_str());
+        let set_value = format!("local.set ${stack_juggler_local_name}");
+        let get_value = format!("local.get ${stack_juggler_local_name}");
         let set_address = format!("local.set ${ADDRESS_LOCAL_NAME}");
         let get_address = format!("local.get ${ADDRESS_LOCAL_NAME}");
         let store_data_type = format!("{}.store", data_type.as_str());
@@ -194,9 +195,31 @@ impl<'a> ModuleTransformer<'a> {
         self.writeln(instruction_str, INSTRUCTION_INDENT);
     }
 
+    fn emit_all_locals(&mut self) {
+        self.writeln(
+            &format!("(local ${ADDRESS_LOCAL_NAME} i32)"),
+            INSTRUCTION_INDENT,
+        );
+        let types = [DataType::I32, DataType::I64, DataType::F32, DataType::F64];
+        for ty in types {
+            self.writeln(
+                &format!(
+                    "(local ${}_{STACK_JUGGLER_NAME} {})",
+                    ty.as_str(),
+                    ty.as_str()
+                ),
+                INSTRUCTION_INDENT,
+            );
+        }
+    }
+
     /// Check the instruction-stream to see if any locals will be needed for stack-juggling.
     /// If so, emit them.
     pub fn emit_locals_if_necessary(&mut self, instructions: &'_ [Instruction]) {
+        if self.skip_safe_splits {
+            self.emit_all_locals();
+            return;
+        }
         let mut stack = Vec::<DataType>::new();
         for instruction in instructions {
             if let InstructionType::Memory(instr_type) = get_instruction_type(instruction) {
@@ -205,17 +228,16 @@ impl<'a> ModuleTransformer<'a> {
                     &format!("(local ${ADDRESS_LOCAL_NAME} i32)"),
                     INSTRUCTION_INDENT,
                 );
+                let mut types: Vec<DataType> = Vec::new();
                 if let MemoryInstructionType::Store { ty, .. } = instr_type {
                     stack.pop();
-                    self.writeln(
-                        &format!("(local ${VALUE_LOCAL_NAME} {})", ty.as_str()),
-                        INSTRUCTION_INDENT,
-                    );
+                    types.push(ty);
                 }
-                stack.into_iter().unique().for_each(|data_type| {
+                types.append(&mut stack);
+                types.into_iter().unique().for_each(|data_type| {
                     self.writeln(
                         &format!(
-                            "(local ${}_{STACK_SAVE_NAME} {})",
+                            "(local ${}_{STACK_JUGGLER_NAME} {})",
                             data_type.as_str(),
                             data_type.as_str()
                         ),
@@ -260,9 +282,9 @@ impl<'a> ModuleTransformer<'a> {
 
         let mut instructions = Vec::new();
         for StackValue { ty, .. } in self.current_stack.iter().rev() {
-            instructions.push(format!("local.set ${}_{STACK_SAVE_NAME}", ty.as_str()));
+            instructions.push(format!("local.set ${}_{STACK_JUGGLER_NAME}", ty.as_str()));
             instructions.push(format!("local.get $state"));
-            instructions.push(format!("local.get ${}_{STACK_SAVE_NAME}", ty.as_str()));
+            instructions.push(format!("local.get ${}_{STACK_JUGGLER_NAME}", ty.as_str()));
             instructions.push(format!("{}.store offset={offset}", ty.as_str()));
             offset += ty.size();
         }
