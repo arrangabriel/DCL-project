@@ -12,18 +12,6 @@ use DataType::*;
 
 use crate::ast_parsing::utils::name_is_param;
 
-#[derive(PartialEq)]
-pub enum InstructionType {
-    Memory(MemoryInstructionType),
-    Benign,
-}
-
-#[derive(PartialEq)]
-pub enum MemoryInstructionType {
-    Load { ty: DataType, offset: u64 },
-    Store { ty: DataType, offset: u64 },
-}
-
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum DataType {
     I32,
@@ -50,6 +38,13 @@ impl DataType {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum MemoryInstructionType {
+    Load { ty: DataType, offset: u64 },
+    Store { ty: DataType, offset: u64 },
+}
+
+#[derive(Copy, Clone, Debug)]
 pub struct StackValue {
     pub ty: DataType,
     pub is_safe: bool,
@@ -63,40 +58,64 @@ pub struct StackEffect {
 
 impl StackEffect {
     fn new(remove_n: usize, add: Option<DataType>, is_safe: bool, preserves_safety: bool) -> Self {
-        StackEffect {
+        Self {
             remove_n,
             add: add.map(|ty| StackValue { ty, is_safe }),
             preserves_safety,
         }
     }
-}
 
-/// Get a pair of operators to remove and possibly to add
-pub fn get_instruction_effect(instruction: &Instruction) -> StackEffect {
-    match instruction {
-        Instruction::LocalGet(index) => match index {
-            Index::Num(_, _) => panic!("Unsupported num index"),
-            Index::Id(id) => StackEffect::new(0, Some(I32), name_is_param(id.name()), true),
-        },
-        I64Load(_) => StackEffect::new(1, Some(I64), false, false),
-        I32WrapI64 => StackEffect::new(1, Some(I32), false, true),
-        I32Const(_) => StackEffect::new(0, Some(I32), false, false),
-        I32Mul | I32Add | I32Load(_) => StackEffect::new(2, Some(I32), false, false),
-        I32Store(_) | I32Store8(_) => StackEffect::new(2, None, false, false),
-        Drop => StackEffect::new(1, None, false, false),
-        _ => panic!("Unsupported instruction read - {:?}", instruction),
+    pub fn update_stack(&self, stack: &mut Vec<StackValue>) -> Result<(), &'static str> {
+        let mut is_safe = false;
+        for _ in 0..self.remove_n {
+            let stack_value = stack
+                .pop()
+                .ok_or("Unbalanced stack - input program is malformed")?;
+            is_safe |= self.preserves_safety && self.remove_n == 1 && stack_value.is_safe;
+        }
+        if let Some(mut stack_value) = self.add {
+            stack_value.is_safe |= is_safe;
+            stack.push(stack_value);
+        }
+        Ok(())
     }
 }
 
-pub fn get_instruction_type(instruction: &Instruction) -> InstructionType {
-    if let Some((ty, offset)) = type_from_load(instruction) {
-        InstructionType::Memory(MemoryInstructionType::Load { ty, offset })
-    } else if let Some((ty, offset)) = type_from_store(instruction) {
-        InstructionType::Memory(MemoryInstructionType::Store { ty, offset })
-    } else if is_other_memory_instruction(instruction) {
-        panic!("Unsupported instruction read - {:?}", instruction)
-    } else {
-        InstructionType::Benign
+impl From<&Instruction<'_>> for StackEffect {
+    fn from(value: &Instruction) -> Self {
+        match value {
+            Instruction::LocalGet(index) => match index {
+                Index::Num(_, _) => panic!("Unsupported num index"),
+                Index::Id(id) => StackEffect::new(0, Some(I32), name_is_param(id.name()), true),
+            },
+            I64Load(_) => StackEffect::new(1, Some(I64), false, false),
+            I32WrapI64 => StackEffect::new(1, Some(I32), false, true),
+            I32Const(_) => StackEffect::new(0, Some(I32), false, false),
+            I32Mul | I32Add | I32Load(_) => StackEffect::new(2, Some(I32), false, false),
+            I32Store(_) | I32Store8(_) => StackEffect::new(2, None, false, false),
+            Drop => StackEffect::new(1, None, false, false),
+            _ => panic!("Unsupported instruction read when producing StackEffect - {value:?}"),
+        }
+    }
+}
+
+#[derive(PartialEq)]
+pub enum InstructionType {
+    Memory(MemoryInstructionType),
+    Benign,
+}
+
+impl From<&Instruction<'_>> for InstructionType {
+    fn from(value: &Instruction) -> Self {
+        if let Some((ty, offset)) = type_from_load(value) {
+            InstructionType::Memory(MemoryInstructionType::Load { ty, offset })
+        } else if let Some((ty, offset)) = type_from_store(value) {
+            InstructionType::Memory(MemoryInstructionType::Store { ty, offset })
+        } else if is_other_memory_instruction(value) {
+            panic!("Unsupported instruction read when producing InstructionType - {value:?}")
+        } else {
+            InstructionType::Benign
+        }
     }
 }
 
@@ -128,4 +147,34 @@ fn is_other_memory_instruction(instruction: &Instruction) -> bool {
         | TableGrow(_) => true,
         _ => false,
     }
+}
+
+pub fn needs_split(
+    instruction: &Instruction,
+    current_stack: &[StackValue],
+    skip_safe_splits: bool,
+) -> Result<Option<SplitType>, &'static str> {
+    let ty = match InstructionType::from(instruction) {
+        InstructionType::Memory(ty) => match ty {
+            MemoryInstructionType::Load { .. } => {
+                let last_is_safe = current_stack
+                    .last()
+                    .ok_or("Load with empty stack - program is malformed")?
+                    .is_safe;
+                if last_is_safe && skip_safe_splits {
+                    None
+                } else {
+                    Some(ty)
+                }
+            }
+            MemoryInstructionType::Store { .. } => Some(ty),
+        },
+        InstructionType::Benign => None,
+    };
+    let split_type = ty.map(|ty| SplitType::Normal(ty));
+    Ok(split_type)
+}
+
+pub enum SplitType {
+    Normal(MemoryInstructionType),
 }

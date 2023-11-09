@@ -1,8 +1,5 @@
-pub use instruction_analysis::*;
-pub use transform_emit::transform_emit_ast;
+pub use splitter::emit_transformed_wat;
 
-mod ast;
 mod instruction_analysis;
-mod module_transformer;
-mod transform_emit;
+mod splitter;
 mod utils;
