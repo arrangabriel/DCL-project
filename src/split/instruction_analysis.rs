@@ -6,11 +6,14 @@ use wast::core::Instruction::{
     TableSet, TableSize,
 };
 use wast::token::Index;
+use BlockInstructionType::Block;
 use Instruction::{I32Add, I32Const, I32Mul, I32WrapI64};
 
+use crate::split::instruction_analysis::BlockInstructionType::{End, Loop};
 use DataType::*;
+use InstructionType::{Benign, Memory};
 
-use crate::ast_parsing::utils::name_is_param;
+use crate::split::utils::name_is_param;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum DataType {
@@ -102,19 +105,60 @@ impl From<&Instruction<'_>> for StackEffect {
 #[derive(PartialEq)]
 pub enum InstructionType {
     Memory(MemoryInstructionType),
-    Benign,
+    Benign(Option<BlockInstructionType>),
+}
+
+#[derive(PartialEq)]
+pub enum BlockInstructionType {
+    End,
+    Block,
+    Loop,
+}
+
+impl InstructionType {
+    pub fn needs_split(
+        &self,
+        stack: &[StackValue],
+        skip_safe_splits: bool,
+    ) -> Result<Option<SplitType>, &'static str> {
+        let ty = match self {
+            Memory(ty) => match ty {
+                MemoryInstructionType::Load { .. } => {
+                    let last_is_safe = stack
+                        .last()
+                        .ok_or("Load with empty stack - program is malformed")?
+                        .is_safe;
+                    if last_is_safe && skip_safe_splits {
+                        None
+                    } else {
+                        Some(ty)
+                    }
+                }
+                MemoryInstructionType::Store { .. } => Some(ty),
+            },
+            Benign(_) => None,
+        };
+        let split_type = ty.map(|&ty| SplitType::Normal(ty));
+        Ok(split_type)
+    }
 }
 
 impl From<&Instruction<'_>> for InstructionType {
     fn from(value: &Instruction) -> Self {
         if let Some((ty, offset)) = type_from_load(value) {
-            InstructionType::Memory(MemoryInstructionType::Load { ty, offset })
+            Memory(MemoryInstructionType::Load { ty, offset })
         } else if let Some((ty, offset)) = type_from_store(value) {
-            InstructionType::Memory(MemoryInstructionType::Store { ty, offset })
+            Memory(MemoryInstructionType::Store { ty, offset })
         } else if is_other_memory_instruction(value) {
             panic!("Unsupported instruction read when producing InstructionType - {value:?}")
         } else {
-            InstructionType::Benign
+            match value {
+                // support if and else at a later date
+                Instruction::Block(_) => Benign(Some(Block)),
+                Instruction::Loop(_) => Benign(Some(Loop)),
+                Instruction::End(_) => Benign(Some(End)),
+                _ => Benign(None),
+            }
         }
     }
 }
@@ -147,32 +191,6 @@ fn is_other_memory_instruction(instruction: &Instruction) -> bool {
         | TableGrow(_) => true,
         _ => false,
     }
-}
-
-pub fn needs_split(
-    instruction: &Instruction,
-    current_stack: &[StackValue],
-    skip_safe_splits: bool,
-) -> Result<Option<SplitType>, &'static str> {
-    let ty = match InstructionType::from(instruction) {
-        InstructionType::Memory(ty) => match ty {
-            MemoryInstructionType::Load { .. } => {
-                let last_is_safe = current_stack
-                    .last()
-                    .ok_or("Load with empty stack - program is malformed")?
-                    .is_safe;
-                if last_is_safe && skip_safe_splits {
-                    None
-                } else {
-                    Some(ty)
-                }
-            }
-            MemoryInstructionType::Store { .. } => Some(ty),
-        },
-        InstructionType::Benign => None,
-    };
-    let split_type = ty.map(|ty| SplitType::Normal(ty));
-    Ok(split_type)
 }
 
 pub enum SplitType {

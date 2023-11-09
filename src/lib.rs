@@ -3,9 +3,9 @@ use std::io;
 use wast::parser::ParseBuffer;
 use wast::{parser, Wat};
 
-use crate::ast_parsing::emit_transformed_wat;
+use crate::split::emit_transformed_wat;
 
-mod ast_parsing;
+mod split;
 
 pub fn parse_wast_string(
     wast_string: &str,
