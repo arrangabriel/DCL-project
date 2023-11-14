@@ -6,16 +6,14 @@ use wast::core::Instruction;
 use crate::split::instruction_analysis::{
     DataType, InstructionType, MemoryInstructionType, StackEffect, StackValue,
 };
-use crate::split::utils::{
-    ADDRESS_LOCAL_NAME, INDENTATION_STR, INSTRUCTION_INDENT, MODULE_INDENT, MODULE_MEMBER_INDENT,
-    STACK_JUGGLER_NAME, STATE_BASE_OFFSET, TRANSACTION_FUNCTION_SIGNATURE,
-};
+use crate::split::utils::*;
 
 pub struct WatEmitter<'a> {
     raw_text: &'a str,
     output_writer: Box<dyn Write>,
     pub skip_safe_splits: bool,
     pub utx_function_names: Vec<String>,
+    pub current_scope_level: usize,
 }
 
 impl<'a> WatEmitter<'a> {
@@ -25,6 +23,7 @@ impl<'a> WatEmitter<'a> {
             output_writer,
             skip_safe_splits,
             utx_function_names: Vec::default(),
+            current_scope_level: 0,
         }
     }
 
@@ -132,7 +131,7 @@ impl<'a> WatEmitter<'a> {
             .ok_or("Out of bounds access when trying to emit instruction from function")?
             .trim();
 
-        self.writeln(instruction_str, INSTRUCTION_INDENT);
+        self.emit_instruction(instruction_str, None);
         Ok(())
     }
 
@@ -141,11 +140,13 @@ impl<'a> WatEmitter<'a> {
             Some(annotation) => format!("{instruction:<30};;{annotation}"),
             None => instruction.into(),
         };
-        self.writeln(&instruction, INSTRUCTION_INDENT);
+        self.writeln(&instruction, INSTRUCTION_INDENT + self.current_scope_level);
     }
 
-    pub fn emit_save_stack(&mut self, stack: &[StackValue]) {
-        let mut offset = STATE_BASE_OFFSET;
+    pub fn emit_save_stack(&mut self, stack: &[StackValue], from: usize) {
+        let already_saved_size: usize = stack[..from].iter().map(|value| value.ty.size()).sum();
+        let mut offset = STATE_BASE_OFFSET + already_saved_size;
+        let stack = &stack[from..];
         let instructions = stack.iter().rev().flat_map(|StackValue { ty, .. }| {
             let ty_str = ty.as_str();
             offset += ty.size();
@@ -159,7 +160,8 @@ impl<'a> WatEmitter<'a> {
 
         for (i, instruction) in instructions.enumerate() {
             let annotation = if i == 0 {
-                Some(format!("Save stack - {stack:?}"))
+                let stack = stack.iter().map(|value| value.to_string()).join(", ");
+                Some(format!("Save stack - [{stack}]"))
             } else {
                 None
             };
@@ -167,8 +169,12 @@ impl<'a> WatEmitter<'a> {
         }
     }
 
-    pub fn emit_restore_stack(&mut self, stack: &[StackValue]) {
-        let mut offset: usize = stack.iter().map(|StackValue { ty, .. }| ty.size()).sum();
+    pub fn emit_restore_stack(&mut self, stack: &[StackValue], from: usize, until: usize) {
+        let mut offset: usize = stack[..until]
+            .iter()
+            .map(|StackValue { ty, .. }| ty.size())
+            .sum();
+        let stack = &stack[from..until];
         let instructions = stack.iter().flat_map(|StackValue { ty, .. }| {
             offset -= ty.size();
             [
@@ -179,7 +185,8 @@ impl<'a> WatEmitter<'a> {
 
         for (i, instruction) in instructions.enumerate() {
             let annotation = if i == 0 {
-                Some(format!("Restore stack - {stack:?}"))
+                let stack = stack.iter().map(|value| value.to_string()).join(", ");
+                Some(format!("Restore stack - [{stack}]"))
             } else {
                 None
             };

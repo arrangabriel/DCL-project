@@ -1,18 +1,21 @@
+use std::fmt::{Display, Formatter};
+
 use wast::core::Instruction;
 use wast::core::Instruction::{
     DataDrop, Drop, ElemDrop, F32Load, F32Store, F64Load, F64Store, GlobalGet, GlobalSet, I32Load,
-    I32Store, I32Store8, I64Load, I64Store, I64Store8, MemoryCopy, MemoryDiscard, MemoryFill,
-    MemoryGrow, MemoryInit, MemorySize, TableCopy, TableFill, TableGet, TableGrow, TableInit,
-    TableSet, TableSize,
+    I32Store, I32Store8, I64Add, I64Const, I64Load, I64Mul, I64Store, I64Store8, MemoryCopy,
+    MemoryDiscard, MemoryFill, MemoryGrow, MemoryInit, MemorySize, TableCopy, TableFill, TableGet,
+    TableGrow, TableInit, TableSet, TableSize,
 };
 use wast::token::Index;
-use BlockInstructionType::Block;
-use Instruction::{I32Add, I32Const, I32Mul, I32WrapI64};
+use Instruction::{I32Add, I32Const, I32Eq, I32Mul, I32WrapI64, I64Eq, LocalGet};
 
-use crate::split::instruction_analysis::BlockInstructionType::{End, Loop};
+use BlockInstructionType::Block;
 use DataType::*;
 use InstructionType::{Benign, Memory};
 
+use crate::split::instruction_analysis::BlockInstructionType::{End, Loop};
+use crate::split::splitter::{Scope, ScopeType};
 use crate::split::utils::name_is_param;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -53,6 +56,13 @@ pub struct StackValue {
     pub is_safe: bool,
 }
 
+impl Display for StackValue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let safe_string = if self.is_safe { " - safe" } else { "" };
+        write!(f, "({:?}{safe_string})", self.ty)
+    }
+}
+
 pub struct StackEffect {
     pub remove_n: usize,
     pub add: Option<StackValue>,
@@ -87,16 +97,24 @@ impl StackEffect {
 impl From<&Instruction<'_>> for StackEffect {
     fn from(value: &Instruction) -> Self {
         match value {
-            Instruction::LocalGet(index) => match index {
+            Instruction::Return // The return might have to be handled with care
+            | Instruction::End(_)
+            | Instruction::Block(_)
+            | Instruction::Br(_) => StackEffect::new(0, None, false, false),
+            LocalGet(index) => match index {
                 Index::Num(_, _) => panic!("Unsupported num index"),
                 Index::Id(id) => StackEffect::new(0, Some(I32), name_is_param(id.name()), true),
             },
             I64Load(_) => StackEffect::new(1, Some(I64), false, false),
-            I32WrapI64 => StackEffect::new(1, Some(I32), false, true),
+            I64Const(_) => StackEffect::new(0, Some(I64), false, false),
+            I32WrapI64 | I32Load(_) => StackEffect::new(1, Some(I32), false, true),
             I32Const(_) => StackEffect::new(0, Some(I32), false, false),
-            I32Mul | I32Add | I32Load(_) => StackEffect::new(2, Some(I32), false, false),
+            I32Mul | I32Add | I32Eq => StackEffect::new(2, Some(I32), false, false),
+            I64Mul | I64Add | I64Eq => StackEffect::new(2, Some(I64), false, false),
             I32Store(_) | I32Store8(_) => StackEffect::new(2, None, false, false),
             Drop => StackEffect::new(1, None, false, false),
+            Instruction::F64Const(_) => StackEffect::new(0, Some(F64), false, false),
+            Instruction::F32Const(_) => StackEffect::new(0, Some(F32), false, false),
             _ => panic!("Unsupported instruction read when producing StackEffect - {value:?}"),
         }
     }
@@ -111,16 +129,17 @@ pub enum InstructionType {
 #[derive(PartialEq)]
 pub enum BlockInstructionType {
     End,
-    Block,
-    Loop,
+    Block(Option<String>),
+    Loop(Option<String>),
 }
 
 impl InstructionType {
     pub fn needs_split(
         &self,
         stack: &[StackValue],
+        scopes: &[Scope],
         skip_safe_splits: bool,
-    ) -> Result<Option<SplitType>, &'static str> {
+    ) -> Result<Option<(SplitType, MemoryInstructionType)>, &'static str> {
         let ty = match self {
             Memory(ty) => match ty {
                 MemoryInstructionType::Load { .. } => {
@@ -138,7 +157,24 @@ impl InstructionType {
             },
             Benign(_) => None,
         };
-        let split_type = ty.map(|&ty| SplitType::Normal(ty));
+        let split_type = ty.map(|&ty| {
+            if scopes.is_empty() {
+                (SplitType::Normal, ty)
+            } else if scopes.iter().all(|scope| {
+                matches!(
+                    scope,
+                    Scope {
+                        ty: ScopeType::Block,
+                        ..
+                    }
+                )
+            }) {
+                (SplitType::Block, ty)
+            } else {
+                // This is very iffy, the load should probably only be the top-level scope
+                (SplitType::Loop, ty)
+            }
+        });
         Ok(split_type)
     }
 }
@@ -152,13 +188,14 @@ impl From<&Instruction<'_>> for InstructionType {
         } else if is_other_memory_instruction(value) {
             panic!("Unsupported instruction read when producing InstructionType - {value:?}")
         } else {
-            match value {
+            let instruction_type = match value {
                 // support if and else at a later date
-                Instruction::Block(_) => Benign(Some(Block)),
-                Instruction::Loop(_) => Benign(Some(Loop)),
-                Instruction::End(_) => Benign(Some(End)),
-                _ => Benign(None),
-            }
+                Instruction::Block(id) => Some(Block(id.label.map(|id| id.name().into()))),
+                Instruction::Loop(id) => Some(Loop(id.label.map(|id| id.name().into()))),
+                Instruction::End(_) => Some(End),
+                _ => None,
+            };
+            Benign(instruction_type)
         }
     }
 }
@@ -194,5 +231,26 @@ fn is_other_memory_instruction(instruction: &Instruction) -> bool {
 }
 
 pub enum SplitType {
-    Normal(MemoryInstructionType),
+    Normal,
+    Block,
+    Loop,
+}
+
+/// To be used at some point inside of a scope
+pub fn index_of_scope_end(instructions: &[Instruction]) -> Result<usize, &'static str> {
+    let mut scope_level = 1;
+    for (i, instruction) in instructions.iter().enumerate() {
+        if let Benign(Some(block_instruction_type)) = InstructionType::from(instruction) {
+            scope_level += match block_instruction_type {
+                End => -1,
+                Block(_) | Loop(_) => 1,
+            };
+            if scope_level == 0 {
+                return Ok(i);
+            } else if scope_level < 0 {
+                return Err("Unbalanced scope delimiters");
+            }
+        }
+    }
+    Err("Unbalanced scope delimiters")
 }

@@ -1,85 +1,70 @@
 (module
     (func $f (type $utx_f) (param $tx i32) (param $utx i32) (param $state i32) (result i32)
         (local $memory_address i32)
-        (local $i32_local i32)
-        (local $i64_local i64)
-        (local $f32_local f32)
-        (local $f64_local f64)
         local.get $tx
-        local.set $memory_address
+        local.set $memory_address     ;;Save address for load
         local.get $utx
         local.get $memory_address
-        i32.const 0
+        i32.const 0                   ;;Convert =offset to value
         i32.add
         i32.store
         local.get $utx                ;;Save naddr = 1
         i32.const 1
         i32.store8 offset=63
-        i32.const 1                   ;;Return index to next microtransaction
+        i32.const 2                   ;;Return index to next microtransaction
     )
     (func $f_1 (type $utx_f) (param $tx i32) (param $utx i32) (param $state i32) (result i32)
         (local $memory_address i32)
         (local $i32_local i32)
-        (local $i64_local i64)
-        (local $f32_local f32)
-        (local $f64_local f64)
-        local.get $utx
+        local.get $utx                ;;Restore load address
         i32.load
         i64.load
         i32.wrap_i64
         i32.const 4
         i32.mul
         local.get $tx
-        local.set $memory_address
+        local.set $memory_address     ;;Save address for load
         local.get $utx
         local.get $memory_address
-        i32.const 8
+        i32.const 8                   ;;Convert =offset to value
         i32.add
         i32.store
         local.get $utx                ;;Save naddr = 1
         i32.const 1
         i32.store8 offset=63
-        local.set $i32_local          ;;Save stack - [StackValue { ty: I32, is_safe: false }]
+        local.set $i32_local          ;;Save stack - [(I32)]
         local.get $state
         local.get $i32_local
         i32.store offset=0
-        i32.const 2                   ;;Return index to next microtransaction
+        i32.const 3                   ;;Return index to next microtransaction
     )
     (func $f_1_1 (type $utx_f) (param $tx i32) (param $utx i32) (param $state i32) (result i32)
         (local $memory_address i32)
         (local $i32_local i32)
-        (local $i64_local i64)
-        (local $f32_local f32)
-        (local $f64_local f64)
-        local.get $state
+        local.get $state              ;;Restore stack - [(I32)]
         i32.load offset=0
-        local.get $utx
+        local.get $utx                ;;Restore load address
         i32.load
         i32.load
-        local.set $i32_local
-        local.set $memory_address
+        local.set $i32_local          ;;Save value for store
+        local.set $memory_address     ;;Save address for store
         local.get $state
         local.get $i32_local
         i32.store
         local.get $utx
         local.get $memory_address
-        i32.const 0
+        i32.const 0                   ;;Convert =offset to value
         i32.add
         i32.store
         local.get $utx                ;;Save naddr = 1
         i32.const 1
         i32.store8 offset=63
-        i32.const 3                   ;;Return index to next microtransaction
+        i32.const 4                   ;;Return index to next microtransaction
     )
     (func $f_1_1_1 (type $utx_f) (param $tx i32) (param $utx i32) (param $state i32) (result i32)
-        (local $memory_address i32)
-        (local $i32_local i32)
-        (local $i64_local i64)
-        (local $f32_local f32)
-        (local $f64_local f64)
-        local.get $utx
+        local.get $utx                ;;Restore store address
         i32.load
-        local.get $state
+        local.get $state              ;;Restore store value
         i32.load
         i32.store
         i32.const 0
