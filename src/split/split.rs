@@ -121,7 +121,8 @@ pub fn handle_pre_split<'a>(
 
     transformer.emit_save_stack(&stack, stack_start, false);
 
-    // TODO - identify by culprit instruction, not name
+    // Check if a split has already been created for this instruction,
+    // if so simply return that table index
     let existing_index = transformer
         .utx_function_names
         .iter()
@@ -184,6 +185,11 @@ pub fn handle_defered_split<'a>(
                 }
             }
         }
+        transformer.emit_restore_stack(
+            &deferred_split.stack,
+            curr_stack_base,
+            deferred_split.stack.len(),
+        );
     }
     let post_split: Vec<(String, Option<String>)> = match deferred_split.culprit_instruction {
         MemoryInstructionType::Load { ty, .. } => {
