@@ -1,21 +1,19 @@
 use std::fmt::{Display, Formatter};
 
 use wast::core::Instruction;
-use wast::core::Instruction::{
-    DataDrop, Drop, ElemDrop, F32Load, F32Store, F64Load, F64Store, GlobalGet, GlobalSet, I32Load,
-    I32Store, I32Store8, I64Add, I64Const, I64Load, I64Mul, I64Store, I64Store8, MemoryCopy,
-    MemoryDiscard, MemoryFill, MemoryGrow, MemoryInit, MemorySize, TableCopy, TableFill, TableGet,
-    TableGrow, TableInit, TableSet, TableSize,
-};
 use wast::token::Index;
-use Instruction::{I32Add, I32Const, I32Eq, I32Mul, I32WrapI64, I64Eq, LocalGet};
+use Instruction::{
+    DataDrop, Drop, ElemDrop, F32Load, F32Store, F64Load, F64Store, GlobalGet, GlobalSet, I32Add,
+    I32Const, I32Eq, I32Load, I32Mul, I32Store, I32Store8, I32WrapI64, I64Add, I64Const, I64Eq,
+    I64Load, I64Mul, I64Store, I64Store8, LocalGet, MemoryCopy, MemoryDiscard, MemoryFill,
+    MemoryGrow, MemoryInit, MemorySize, TableCopy, TableFill, TableGet, TableGrow, TableInit,
+    TableSet, TableSize,
+};
 
-use BlockInstructionType::Block;
 use DataType::*;
 use InstructionType::{Benign, Memory};
 
-use crate::split::instruction_analysis::BlockInstructionType::{End, Loop};
-use crate::split::splitter::{Scope, ScopeType};
+use crate::split::transform::Scope;
 use crate::split::utils::name_is_param;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
@@ -130,7 +128,6 @@ pub enum InstructionType {
 pub enum BlockInstructionType {
     End,
     Block(Option<String>),
-    Loop(Option<String>),
 }
 
 impl InstructionType {
@@ -158,22 +155,14 @@ impl InstructionType {
             Benign(_) => None,
         };
         let split_type = ty.map(|&ty| {
-            if scopes.is_empty() {
-                (SplitType::Normal, ty)
-            } else if scopes.iter().all(|scope| {
-                matches!(
-                    scope,
-                    Scope {
-                        ty: ScopeType::Block,
-                        ..
-                    }
-                )
-            }) {
-                (SplitType::Block, ty)
-            } else {
-                // This is very iffy, the load should probably only be the top-level scope
-                (SplitType::Loop, ty)
-            }
+            (
+                if scopes.is_empty() {
+                    SplitType::Normal
+                } else {
+                    SplitType::Block
+                },
+                ty,
+            )
         });
         Ok(split_type)
     }
@@ -190,9 +179,10 @@ impl From<&Instruction<'_>> for InstructionType {
         } else {
             let instruction_type = match value {
                 // support if and else at a later date
-                Instruction::Block(id) => Some(Block(id.label.map(|id| id.name().into()))),
-                Instruction::Loop(id) => Some(Loop(id.label.map(|id| id.name().into()))),
-                Instruction::End(_) => Some(End),
+                Instruction::Block(id) => Some(BlockInstructionType::Block(
+                    id.label.map(|id| id.name().into()),
+                )),
+                Instruction::End(_) => Some(BlockInstructionType::End),
                 _ => None,
             };
             Benign(instruction_type)
@@ -233,7 +223,6 @@ fn is_other_memory_instruction(instruction: &Instruction) -> bool {
 pub enum SplitType {
     Normal,
     Block,
-    Loop,
 }
 
 /// To be used at some point inside of a scope
@@ -242,8 +231,8 @@ pub fn index_of_scope_end(instructions: &[Instruction]) -> Result<usize, &'stati
     for (i, instruction) in instructions.iter().enumerate() {
         if let Benign(Some(block_instruction_type)) = InstructionType::from(instruction) {
             scope_level += match block_instruction_type {
-                End => -1,
-                Block(_) | Loop(_) => 1,
+                BlockInstructionType::End => -1,
+                BlockInstructionType::Block(_) => 1,
             };
             if scope_level == 0 {
                 return Ok(i);

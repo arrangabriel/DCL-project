@@ -12,7 +12,7 @@ pub struct WatEmitter<'a> {
     raw_text: &'a str,
     output_writer: Box<dyn Write>,
     pub skip_safe_splits: bool,
-    pub utx_function_names: Vec<String>,
+    pub utx_function_names: Vec<(usize, String)>,
     pub current_scope_level: usize,
 }
 
@@ -58,6 +58,7 @@ impl<'a> WatEmitter<'a> {
     }
 
     pub fn emit_locals_if_neccessary(&mut self, instructions: &[Instruction]) {
+        // TODO - save predefined locals
         if self.skip_safe_splits {
             self.emit_all_locals();
             return;
@@ -143,15 +144,16 @@ impl<'a> WatEmitter<'a> {
         self.writeln(&instruction, INSTRUCTION_INDENT + self.current_scope_level);
     }
 
-    pub fn emit_save_stack(&mut self, stack: &[StackValue], from: usize) {
+    pub fn emit_save_stack(&mut self, stack: &[StackValue], from: usize, keep_on_stack: bool) {
         let already_saved_size: usize = stack[..from].iter().map(|value| value.ty.size()).sum();
         let mut offset = STATE_BASE_OFFSET + already_saved_size;
         let stack = &stack[from..];
+        let set_flavour = if keep_on_stack { "tee" } else { "set" };
         let instructions = stack.iter().rev().flat_map(|StackValue { ty, .. }| {
             let ty_str = ty.as_str();
             offset += ty.size();
             [
-                format!("local.set ${ty_str}_{STACK_JUGGLER_NAME}"),
+                format!("local.{set_flavour} ${ty_str}_{STACK_JUGGLER_NAME}"),
                 format!("local.get $state"),
                 format!("local.get ${ty_str}_{STACK_JUGGLER_NAME}"),
                 format!("{ty_str}.store offset={}", offset - ty.size()),
@@ -204,7 +206,7 @@ impl<'a> WatEmitter<'a> {
             let function_names = self
                 .utx_function_names
                 .iter()
-                .map(|name| format!("${name}"))
+                .map(|(_, name)| format!("${name}"))
                 .collect::<Vec<String>>()
                 .join(" ");
 

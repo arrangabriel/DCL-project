@@ -1,9 +1,8 @@
 use std::io;
 
+use crate::split::emit_transformed_wat;
 use wast::parser::ParseBuffer;
 use wast::{parser, Wat};
-
-use crate::split::emit_transformed_wat;
 
 mod split;
 
