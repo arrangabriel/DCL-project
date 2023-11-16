@@ -10,25 +10,19 @@ use crate::split::wat_emitter::WatEmitter;
 pub fn setup_split<'a>(
     base_name: &str,
     base_split_count: usize,
-    base_offset: usize,
-    current_offset: usize,
-    instruction_offset: usize,
-    instructions: &'a [Instruction<'a>],
-    culprit_instruction: MemoryInstructionType,
+    instructions: &'a [(&Instruction<'a>, usize)],
+    culprit_instruction_with_index: (MemoryInstructionType, usize),
     split_type: SplitType,
     mut stack: Vec<StackValue>,
-    scopes: Vec<Scope>,
+    scopes: &[Scope],
     mut deferred_splits: Vec<DeferredSplit<'a>>,
     transformer: &mut WatEmitter,
 ) -> Result<Vec<DeferredSplit<'a>>, &'static str> {
-    let local_offset = current_offset + 1;
     if let Some(new_split) = handle_pre_split(
         base_name,
-        base_offset,
-        culprit_instruction,
-        &instructions[local_offset..],
-        instruction_offset + local_offset,
-        base_split_count + deferred_splits.len(),
+        culprit_instruction_with_index,
+        instructions,
+        base_split_count,
         &mut stack,
         &scopes,
         transformer,
@@ -38,18 +32,16 @@ pub fn setup_split<'a>(
     match split_type {
         SplitType::Block => {
             transformer.emit_instruction("return".into(), None);
-            let scope_end = index_of_scope_end(&instructions[current_offset..])? + current_offset;
-            let mut new_splits = handle_instructions(
+            let scope_end = index_of_scope_end(instructions)?;
+            let mut sub_splits = handle_instructions(
                 base_name,
-                base_offset,
                 &instructions[scope_end..],
-                instruction_offset + scope_end,
                 stack,
-                scopes, // This might not be correct
-                base_split_count + deferred_splits.len(),
+                scopes.to_vec(), // This might not be correct
+                base_split_count + 1,
                 transformer,
             )?;
-            deferred_splits.append(&mut new_splits);
+            deferred_splits.append(&mut sub_splits);
         }
         SplitType::Normal => {
             transformer.emit_end_func();
@@ -60,16 +52,14 @@ pub fn setup_split<'a>(
 
 pub fn handle_pre_split<'a>(
     base_name: &str,
-    func_offset: usize,
-    culprit_instruction: MemoryInstructionType,
-    instructions: &'a [Instruction],
-    instruction_offset: usize,
+    culprit_instruction_with_index: (MemoryInstructionType, usize),
+    instructions: &'a [(&Instruction<'a>, usize)],
     split_count: usize,
     stack: &mut Vec<StackValue>,
     scopes: &[Scope],
     transformer: &mut WatEmitter,
 ) -> Option<DeferredSplit<'a>> {
-    let culprit_address = func_offset + instruction_offset; //-1?
+    let (culprit_instruction, culprit_index) = culprit_instruction_with_index;
     let pre_split = match culprit_instruction {
         MemoryInstructionType::Load { offset, .. } => {
             stack.pop();
@@ -126,7 +116,7 @@ pub fn handle_pre_split<'a>(
     let existing_index = transformer
         .utx_function_names
         .iter()
-        .position(|(address, _)| culprit_address == *address);
+        .position(|(address, _)| culprit_index == *address);
     let index = existing_index.unwrap_or(transformer.utx_function_names.len()) + 1;
     transformer.emit_instruction(
         &format!("i32.const {index}"),
@@ -137,13 +127,11 @@ pub fn handle_pre_split<'a>(
         let name = format!("{base_name}_{split_index}", split_index = split_count + 1);
         transformer
             .utx_function_names
-            .push((culprit_address, name.clone()));
+            .push((culprit_index, name.clone()));
         Some(DeferredSplit {
             name,
-            func_offset,
             culprit_instruction,
-            instructions,
-            instruction_offset,
+            instructions_with_index: instructions,
             stack: stack.to_vec(),
             scopes: scopes.to_vec(),
         })
@@ -158,7 +146,7 @@ pub fn handle_defered_split<'a>(
 ) -> Result<Vec<DeferredSplit<'a>>, &'static str> {
     setup_func(
         &deferred_split.name,
-        deferred_split.instructions,
+        deferred_split.instructions_with_index,
         transformer,
     );
     if deferred_split.scopes.is_empty() {
@@ -227,9 +215,7 @@ pub fn handle_defered_split<'a>(
     // This call recurses indirectly
     handle_instructions(
         &deferred_split.name,
-        deferred_split.func_offset,
-        deferred_split.instructions,
-        deferred_split.instruction_offset,
+        deferred_split.instructions_with_index,
         deferred_split.stack,
         deferred_split.scopes,
         0,
@@ -240,10 +226,8 @@ pub fn handle_defered_split<'a>(
 #[derive(Clone)]
 pub struct DeferredSplit<'a> {
     name: String,
-    func_offset: usize,
     culprit_instruction: MemoryInstructionType,
-    instructions: &'a [Instruction<'a>],
-    instruction_offset: usize,
+    instructions_with_index: &'a [(&'a Instruction<'a>, usize)],
     stack: Vec<StackValue>,
     scopes: Vec<Scope>,
 }

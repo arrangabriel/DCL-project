@@ -1,12 +1,15 @@
+use std::io::Write;
+
+use itertools::Itertools;
+use wast::core::{Func, FuncKind, Instruction, ModuleField, ModuleKind, ValType};
+use wast::Wat;
+
 use crate::split::instruction_analysis::{
-    BlockInstructionType, InstructionType, StackEffect, StackValue,
+    BlockInstructionType, DataType, InstructionType, StackEffect, StackValue,
 };
 use crate::split::split::{handle_defered_split, setup_split, DeferredSplit};
 use crate::split::utils::{gen_random_func_name, IGNORE_FUNC_PREFIX, MODULE_MEMBER_INDENT};
 use crate::split::wat_emitter::WatEmitter;
-use std::io::Write;
-use wast::core::{Func, FuncKind, Instruction, ModuleField, ModuleKind};
-use wast::Wat;
 
 pub fn emit_transformed_wat(
     wat: &Wat,
@@ -32,7 +35,14 @@ pub fn emit_transformed_wat(
                     locals: _,
                 } = &func.kind
                 {
-                    handle_top_level_func(func, &expression.instrs, &mut transformer)?;
+                    let instruction_base_index = transformer.get_function_instructions_index(func);
+                    let instructions_with_index: Vec<(&Instruction, usize)> = expression
+                        .instrs
+                        .iter()
+                        .enumerate()
+                        .map(|(i, instruction)| (instruction, instruction_base_index + i))
+                        .collect();
+                    handle_top_level_func(func, &instructions_with_index, &mut transformer)?;
                 }
             }
             ModuleField::Export(export) => {
@@ -47,7 +57,7 @@ pub fn emit_transformed_wat(
 
 fn handle_top_level_func(
     func: &Func,
-    instructions: &[Instruction],
+    instructions_with_index: &[(&Instruction, usize)],
     transformer: &mut WatEmitter,
 ) -> Result<(), &'static str> {
     let name = match func.id.map(|id| id.name()) {
@@ -61,15 +71,35 @@ fn handle_top_level_func(
         }
     };
     let func_offset = func.span.offset();
-    setup_func(&name, instructions, transformer);
+    setup_func(&name, instructions_with_index, transformer);
+
     transformer
         .utx_function_names
-        .push((func_offset, name.clone()));
+        .push((func_offset, name.clone())); // Here we should use some sort of default value
+
+    if let FuncKind::Inline { locals, .. } = &func.kind {
+        let local_types = locals
+            .iter()
+            .map(|local| {
+                match local.ty {
+                    ValType::I32 => DataType::I32,
+                    ValType::I64 => DataType::I64,
+                    ValType::F32 => DataType::F32,
+                    ValType::F64 => DataType::F64,
+                    _ => panic!("Unsupported local type {:?}", local.ty),
+                }
+                .as_str()
+                .to_string() // Lame
+            })
+            .join(" ");
+        if !local_types.is_empty() {
+            transformer.emit_instruction(&format!("(local {local_types})"), None)
+        }
+    };
+    // Maybe we return these, and handle them in bulk after emitting all top-level
     let mut deferred_splits = handle_instructions(
         &name,
-        func_offset,
-        instructions,
-        0,
+        instructions_with_index,
         Vec::default(),
         Vec::default(),
         0,
@@ -86,16 +116,18 @@ fn handle_top_level_func(
     Ok(())
 }
 
-pub fn setup_func(name: &str, instructions: &[Instruction], transformer: &mut WatEmitter) {
+pub fn setup_func(
+    name: &str,
+    instructions_with_index: &[(&Instruction, usize)],
+    transformer: &mut WatEmitter,
+) {
     transformer.emit_utx_func_signature(name);
-    transformer.emit_locals_if_neccessary(instructions);
+    transformer.emit_locals_if_neccessary(instructions_with_index);
 }
 
 pub fn handle_instructions<'a>(
     name: &str,
-    func_offset: usize,
-    instructions: &'a [Instruction<'a>],
-    instruction_offset: usize,
+    instructions: &'a [(&Instruction<'a>, usize)],
     mut stack: Vec<StackValue>,
     mut scopes: Vec<Scope>,
     split_count: usize,
@@ -103,22 +135,20 @@ pub fn handle_instructions<'a>(
 ) -> Result<Vec<DeferredSplit<'a>>, &'static str> {
     let deferred_splits: Vec<DeferredSplit> = Vec::default();
     transformer.current_scope_level = scopes.len();
-    for (i, instruction) in instructions.iter().enumerate() {
+    for (i, &(instruction, instruction_index)) in instructions.iter().enumerate() {
         let ty = InstructionType::from(instruction);
-        if let Some((split_type, culprit_instruction)) =
+        if let Some((split_type, culprit_instruction_type)) =
             ty.needs_split(&stack, &scopes, transformer.skip_safe_splits)?
         {
             return setup_split(
                 name,
-                split_count,
-                func_offset,
-                i,
-                instruction_offset,
-                instructions,
-                culprit_instruction,
+                split_count + deferred_splits.len(),
+                // Only pass on instructions after the culprit
+                &instructions[i + 1..],
+                (culprit_instruction_type, instruction_index),
                 split_type,
                 stack,
-                scopes,
+                &scopes,
                 deferred_splits,
                 transformer,
             );
@@ -126,7 +156,6 @@ pub fn handle_instructions<'a>(
             let stack_start = stack.len();
             match ty {
                 BlockInstructionType::Block(name) => {
-                    // TODO - save stack (sigh)
                     let prev_stack_start =
                         scopes.last().map(|scope| scope.stack_start).unwrap_or(0);
                     transformer.emit_save_stack(&stack, prev_stack_start, true);
@@ -135,8 +164,7 @@ pub fn handle_instructions<'a>(
                         name,
                         stack_start,
                     });
-                    transformer
-                        .emit_instruction_from_function(func_offset, instruction_offset + i)?;
+                    transformer.emit_instruction_by_index(instruction_index)?;
                     transformer.current_scope_level += 1;
                     continue;
                 }
@@ -155,7 +183,7 @@ pub fn handle_instructions<'a>(
             }
         }
         StackEffect::from(instruction).update_stack(&mut stack)?;
-        transformer.emit_instruction_from_function(func_offset, instruction_offset + i)?;
+        transformer.emit_instruction_by_index(instruction_index)?;
     }
     transformer.emit_end_func();
     Ok(deferred_splits)

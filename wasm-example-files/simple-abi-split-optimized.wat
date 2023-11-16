@@ -1,5 +1,4 @@
 (module
-    (type $utx_f (func (param i32 i32 i32) (result i32)))
     (func $f (type $utx_f) (param $tx i32) (param $utx i32) (param $state i32) (result i32)
         (local $memory_address i32)
         (local $i32_local i32)
@@ -13,20 +12,20 @@
         i32.mul
         local.get $tx
         i32.load offset=8
-        local.set $i32_local
-        local.set $memory_address
+        local.set $i32_local          ;;Save value for store
+        local.set $memory_address     ;;Save address for store
         local.get $state
         local.get $i32_local
         i32.store
         local.get $utx
         local.get $memory_address
-        i32.const 0
+        i32.const 0                   ;;Convert =offset to value
         i32.add
         i32.store
-        local.get $utx
+        local.get $utx                ;;Save naddr = 1
         i32.const 1
         i32.store8 offset=63
-        i32.const 2
+        i32.const 2                   ;;Return index to next microtransaction
     )
     (func $f_1 (type $utx_f) (param $tx i32) (param $utx i32) (param $state i32) (result i32)
         (local $memory_address i32)
@@ -34,9 +33,9 @@
         (local $i64_local i64)
         (local $f32_local f32)
         (local $f64_local f64)
-        local.get $utx
+        local.get $utx                ;;Restore store address
         i32.load
-        local.get $state
+        local.get $state              ;;Restore store value
         i32.load
         i32.store
         i32.const 0
@@ -93,7 +92,8 @@
     (export "__get_utx_log2lens" (func $__get_utx_log2lens))
     (export "__get_utx_naddr" (func $__get_utx_naddr))
     (export "__get_balance" (func $__get_balance))
-    (memory 10)
     (table 3 funcref)
     (elem (i32.const 1) func $f $f_1)
+    (memory 10)
+    (type $utx_f (func (param i32 i32 i32) (result i32)))
 )

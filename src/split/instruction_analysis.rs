@@ -226,9 +226,11 @@ pub enum SplitType {
 }
 
 /// To be used at some point inside of a scope
-pub fn index_of_scope_end(instructions: &[Instruction]) -> Result<usize, &'static str> {
+pub fn index_of_scope_end(
+    instructions_with_index: &[(&Instruction, usize)],
+) -> Result<usize, &'static str> {
     let mut scope_level = 1;
-    for (i, instruction) in instructions.iter().enumerate() {
+    for (i, &(instruction, _)) in instructions_with_index.iter().enumerate() {
         if let Benign(Some(block_instruction_type)) = InstructionType::from(instruction) {
             scope_level += match block_instruction_type {
                 BlockInstructionType::End => -1,
