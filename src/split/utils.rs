@@ -27,3 +27,8 @@ pub fn name_is_param(name: &str) -> bool {
         _ => false,
     }
 }
+
+/// Assuming use in a function of the type (tx, state) -> ?
+pub fn index_is_param(index: usize) -> bool {
+    index < 3
+}

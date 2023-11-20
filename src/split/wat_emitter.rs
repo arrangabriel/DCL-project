@@ -9,7 +9,6 @@ use crate::split::instruction_analysis::{
 use crate::split::utils::*;
 
 pub struct WatEmitter<'a> {
-    raw_text: &'a str,
     lines: Vec<&'a str>,
     output_writer: Box<dyn Write>,
     pub skip_safe_splits: bool,
@@ -20,7 +19,6 @@ pub struct WatEmitter<'a> {
 impl<'a> WatEmitter<'a> {
     pub fn new(raw_text: &'a str, output_writer: Box<dyn Write>, skip_safe_splits: bool) -> Self {
         Self {
-            raw_text,
             lines: raw_text.split("\n").collect(),
             output_writer,
             skip_safe_splits,
@@ -36,32 +34,48 @@ impl<'a> WatEmitter<'a> {
             .expect("Could not write");
     }
 
-    pub fn emit_section(&mut self, from: usize, indent: usize) -> Result<(), &'static str> {
-        let mut paren_count = 0;
-        let mut to = None;
-        let text_to_search = &self.raw_text[from - 1..];
-        for (i, c) in text_to_search.chars().enumerate() {
-            paren_count += match c {
-                '(' => 1,
-                ')' => -1,
-                _ => 0,
-            };
-            if paren_count == 0 {
-                to = Some(i);
-                break;
+    pub fn emit_section(&mut self, from: usize) -> Result<(), &'static str> {
+        let lines = &self.lines[self.get_line_from_offset(from)..];
+        let mut section = Vec::default();
+        let mut scope_count = 0;
+        'outer: for &line in lines {
+            let line = line.trim();
+            section.push(line);
+            for c in line.chars() {
+                scope_count += match c {
+                    '(' => 1,
+                    ')' => -1,
+                    _ => 0,
+                };
+                if scope_count == 0 {
+                    break 'outer;
+                }
             }
         }
-        if let Some(i) = to {
-            self.writeln(&text_to_search[..=i], indent);
-            Ok(())
-        } else {
-            Err("Malformed file, unbalanced parenthesis")
+
+        for (i, line) in section.iter().enumerate() {
+            let indent = if i == 0 || i == section.len() - 1 {
+                MODULE_MEMBER_INDENT
+            } else {
+                INSTRUCTION_INDENT
+            };
+            self.writeln(line, indent);
         }
+        Ok(())
     }
 
-    pub fn emit_locals_if_neccessary(&mut self, instructions_with_index: &[(&Instruction, usize)]) {
-        // TODO - save predefined locals
-        if self.skip_safe_splits {
+    pub fn emit_locals(
+        &mut self,
+        instructions_with_index: &[(&Instruction, usize)],
+        local_types: &[DataType],
+    ) {
+        let local_types_str = local_types.iter().map(|ty| ty.as_str()).join(" ");
+        if !local_types_str.is_empty() {
+            self.emit_instruction(&format!("(local {local_types_str})"), None)
+        }
+
+        if true {
+            //self.skip_safe_splits {
             self.emit_all_locals();
             return;
         }
@@ -91,7 +105,7 @@ impl<'a> WatEmitter<'a> {
                 });
                 break;
             }
-            let effect = StackEffect::from(instruction);
+            let effect = StackEffect::from_instruction(instruction, local_types);
             for _ in 0..effect.remove_n {
                 stack.pop();
             }
@@ -238,26 +252,26 @@ impl<'a> WatEmitter<'a> {
     /// Gives the index for the first instruction in a function.
     /// To be used in conjunction with [WatEmitter::emit_instruction_from_function]
     pub fn get_function_instructions_index(&self, func: &Func) -> usize {
-        let base_offset = func.span.offset();
-        let mut instruction_index = None;
+        let instruction_index = self.get_line_from_offset(func.span.offset()) + 1;
+        let local_lines = self.lines[instruction_index..]
+            .iter()
+            .take_while(|line| line.contains("(local"))
+            .count();
+
+        instruction_index + local_lines
+    }
+
+    fn get_line_from_offset(&self, offset: usize) -> usize {
+        let mut line_index = None;
         let mut line_start = 0;
         for (i, &line) in self.lines.iter().enumerate() {
-            // + 1 to account for newlines in raw text
             let next_line_start = line_start + line.len() + 1;
-            if base_offset >= line_start && base_offset < next_line_start {
-                instruction_index = Some(i + 1);
+            if offset >= line_start && offset < next_line_start {
+                line_index = Some(i);
                 break;
             }
             line_start = next_line_start;
         }
-        let instruction_index =
-            instruction_index.expect("Function offset out of bounds in raw text");
-
-        let local_lines = self.lines[instruction_index..]
-            .iter()
-            .take_while(|&&line| line.contains("(local"))
-            .count();
-
-        instruction_index + local_lines
+        line_index.expect("Line offset should not be out of bounds for raw text")
     }
 }

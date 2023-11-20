@@ -1,20 +1,24 @@
 use std::fmt::{Display, Formatter};
 
-use wast::core::Instruction;
+use wast::core::Instruction::LocalSet;
+use wast::core::{Instruction, ValType};
 use wast::token::Index;
 use Instruction::{
-    DataDrop, Drop, ElemDrop, F32Load, F32Store, F64Load, F64Store, GlobalGet, GlobalSet, I32Add,
-    I32Const, I32Eq, I32Load, I32Mul, I32Store, I32Store8, I32WrapI64, I64Add, I64Const, I64Eq,
-    I64Load, I64Mul, I64Store, I64Store8, LocalGet, MemoryCopy, MemoryDiscard, MemoryFill,
-    MemoryGrow, MemoryInit, MemorySize, TableCopy, TableFill, TableGet, TableGrow, TableInit,
-    TableSet, TableSize,
+    Block, Br, BrIf, DataDrop, Drop, ElemDrop, End, F32Const, F32Gt, F32Load, F32Store, F64Const,
+    F64Gt, F64Load, F64Store, GlobalGet, GlobalSet, I32Add, I32Const, I32Eq, I32Eqz, I32GtS,
+    I32GtU, I32Load, I32Load16u, I32LtS, I32LtU, I32Mul, I32Ne, I32Shl, I32Store, I32Store8,
+    I32WrapI64, I64Add, I64Const, I64Eq, I64ExtendI32U, I64GtS, I64GtU, I64Load, I64LtS, I64LtU,
+    I64Mul, I64Ne, I64Store, I64Store8, I64Sub, I64Xor, LocalGet, LocalTee, MemoryCopy,
+    MemoryDiscard, MemoryFill, MemoryGrow, MemoryInit, MemorySize, Return, TableCopy, TableFill,
+    TableGet, TableGrow, TableInit, TableSet, TableSize,
 };
 
 use DataType::*;
 use InstructionType::{Benign, Memory};
 
+use crate::split::instruction_analysis::LocalType::{Get, Set, Tee};
 use crate::split::transform::Scope;
-use crate::split::utils::name_is_param;
+use crate::split::utils::{index_is_param, name_is_param};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum DataType {
@@ -42,10 +46,16 @@ impl DataType {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-pub enum MemoryInstructionType {
-    Load { ty: DataType, offset: u64 },
-    Store { ty: DataType, offset: u64 },
+impl From<ValType<'_>> for DataType {
+    fn from(value: ValType) -> Self {
+        match value {
+            ValType::I32 => I32,
+            ValType::I64 => I64,
+            ValType::F32 => F32,
+            ValType::F64 => F64,
+            _ => panic!("Unsupported type {:?}", value),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -90,82 +100,136 @@ impl StackEffect {
         }
         Ok(())
     }
-}
 
-impl From<&Instruction<'_>> for StackEffect {
-    fn from(value: &Instruction) -> Self {
-        match value {
-            Instruction::Return // The return might have to be handled with care
-            | Instruction::End(_)
-            | Instruction::Block(_)
-            | Instruction::Br(_) => StackEffect::new(0, None, false, false),
-            LocalGet(index) => match index {
-                Index::Num(_, _) => panic!("Unsupported num index"),
-                Index::Id(id) => StackEffect::new(0, Some(I32), name_is_param(id.name()), true),
-            },
-            I64Load(_) => StackEffect::new(1, Some(I64), false, false),
+    pub fn from_instruction(instruction: &Instruction, local_types: &[DataType]) -> Self {
+        match instruction {
+            Return // The return might have to be handled with care
+            | End(_) | Block(_) | Br(_) => StackEffect::new(0, None, false, false),
+            LocalGet(index) => {
+                let (ty, is_safe) = type_and_safety_from_param(index, local_types);
+                StackEffect::new(0, Some(ty), is_safe, true)
+            }
+            LocalTee(_) => StackEffect::new(0, None, false, false),
+            I64Load(_) | I64ExtendI32U => StackEffect::new(1, Some(I64), false, false),
             I64Const(_) => StackEffect::new(0, Some(I64), false, false),
-            I32WrapI64 | I32Load(_) => StackEffect::new(1, Some(I32), false, true),
+            I32WrapI64 | I32Load(_) | I32Load16u(_) | I32Eqz => StackEffect::new(1, Some(I32), false, true),
             I32Const(_) => StackEffect::new(0, Some(I32), false, false),
-            I32Mul | I32Add | I32Eq => StackEffect::new(2, Some(I32), false, false),
-            I64Mul | I64Add | I64Eq => StackEffect::new(2, Some(I64), false, false),
+            I32Mul | I32Add | I32Eq | F64Gt | F32Gt |
+            I32GtU | I32GtS | I64GtU | I64GtS | I32LtU |
+            I32LtS | I64LtU | I64LtS | I64Eq | I32Ne | I64Ne |
+            I32Shl => StackEffect::new(2, Some(I32), false, false),
+            I64Mul | I64Add | I64Xor | I64Sub => StackEffect::new(2, Some(I64), false, false),
             I32Store(_) | I32Store8(_) => StackEffect::new(2, None, false, false),
-            Drop => StackEffect::new(1, None, false, false),
-            Instruction::F64Const(_) => StackEffect::new(0, Some(F64), false, false),
-            Instruction::F32Const(_) => StackEffect::new(0, Some(F32), false, false),
-            _ => panic!("Unsupported instruction read when producing StackEffect - {value:?}"),
+            Drop | BrIf(_) | LocalSet(_) => StackEffect::new(1, None, false, false),
+            F64Const(_) => StackEffect::new(0, Some(F64), false, false),
+            F32Const(_) => StackEffect::new(0, Some(F32), false, false),
+            _ => panic!("Unsupported instruction read when producing StackEffect - {instruction:?}"),
         }
     }
 }
 
-#[derive(PartialEq)]
-pub enum InstructionType {
-    Memory(MemoryInstructionType),
-    Benign(Option<BlockInstructionType>),
+const UTX_LOCALS: [DataType; 3] = [I32, I32, I32];
+
+fn type_and_safety_from_param(index: &Index, local_types: &[DataType]) -> (DataType, bool) {
+    match index {
+        Index::Num(index, _) => {
+            let index = *index as usize;
+            let safe = index_is_param(index);
+            let utx_index = index + if index == 0 { 0 } else { 1 };
+            let mut utx_locals = Vec::default();
+            utx_locals.extend_from_slice(&UTX_LOCALS);
+            utx_locals.extend_from_slice(local_types);
+            let ty = *utx_locals
+                .get(utx_index)
+                .expect("Indexed get to locals should use in bounds index");
+            (ty, safe)
+        }
+        // TODO!!
+        // All id'd instructions being I32 is not correct, this needs to change
+        // luckily compiled code usually uses indexes, not ids.
+        Index::Id(id) => (I32, name_is_param(id.name())),
+    }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
+pub enum InstructionType {
+    Memory(MemoryInstructionType),
+    Benign(BenignInstructionType),
+}
+
+#[derive(PartialEq, Clone)]
+pub enum BenignInstructionType {
+    Block(BlockInstructionType),
+    IndexedLocal(LocalType, usize),
+    Return,
+    Other,
+}
+
+#[derive(PartialEq, Clone)]
+pub enum LocalType {
+    Get,
+    Set,
+    Tee,
+}
+
+impl LocalType {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Get => "get",
+            Set => "set",
+            Tee => "tee",
+        }
+    }
+}
+
+#[derive(PartialEq, Clone)]
 pub enum BlockInstructionType {
     End,
     Block(Option<String>),
 }
 
-impl InstructionType {
+#[derive(Clone, Copy, PartialEq)]
+pub enum MemoryInstructionType {
+    Load { ty: DataType, offset: u64 },
+    Store { ty: DataType, offset: u64 },
+}
+
+impl MemoryInstructionType {
     pub fn needs_split(
         &self,
         stack: &[StackValue],
         scopes: &[Scope],
         skip_safe_splits: bool,
-    ) -> Result<Option<(SplitType, MemoryInstructionType)>, &'static str> {
-        let ty = match self {
-            Memory(ty) => match ty {
-                MemoryInstructionType::Load { .. } => {
-                    let last_is_safe = stack
-                        .last()
-                        .ok_or("Load with empty stack - program is malformed")?
-                        .is_safe;
-                    if last_is_safe && skip_safe_splits {
-                        None
-                    } else {
-                        Some(ty)
-                    }
-                }
-                MemoryInstructionType::Store { .. } => Some(ty),
-            },
-            Benign(_) => None,
-        };
-        let split_type = ty.map(|&ty| {
-            (
-                if scopes.is_empty() {
-                    SplitType::Normal
+    ) -> Result<Option<SplitType>, &'static str> {
+        let needs_split = match self {
+            MemoryInstructionType::Load { .. } => {
+                let last_is_safe = stack
+                    .last()
+                    .ok_or("Load with empty stack - program is malformed")?
+                    .is_safe;
+                if last_is_safe && skip_safe_splits {
+                    false
                 } else {
-                    SplitType::Block
-                },
-                ty,
-            )
-        });
-        Ok(split_type)
+                    true
+                }
+            }
+            MemoryInstructionType::Store { .. } => true,
+        };
+        if !needs_split {
+            return Ok(None);
+        }
+        let split_type = if scopes.is_empty() {
+            SplitType::Normal
+        } else {
+            SplitType::Block
+        };
+        Ok(Some(split_type))
     }
+}
+
+pub enum SplitType {
+    Normal,
+    Block,
 }
 
 impl From<&Instruction<'_>> for InstructionType {
@@ -177,22 +241,30 @@ impl From<&Instruction<'_>> for InstructionType {
         } else if is_other_memory_instruction(value) {
             panic!("Unsupported instruction read when producing InstructionType - {value:?}")
         } else {
-            let instruction_type = match value {
-                // support if and else at a later date
-                Instruction::Block(id) => Some(BlockInstructionType::Block(
+            Benign(match value {
+                Block(id) => BenignInstructionType::Block(BlockInstructionType::Block(
                     id.label.map(|id| id.name().into()),
                 )),
-                Instruction::End(_) => Some(BlockInstructionType::End),
-                _ => None,
-            };
-            Benign(instruction_type)
+                End(_) => BenignInstructionType::Block(BlockInstructionType::End),
+                LocalGet(Index::Num(index, _)) => {
+                    BenignInstructionType::IndexedLocal(Get, *index as usize)
+                }
+                LocalSet(Index::Num(index, _)) => {
+                    BenignInstructionType::IndexedLocal(Set, *index as usize)
+                }
+                LocalTee(Index::Num(index, _)) => {
+                    BenignInstructionType::IndexedLocal(Tee, *index as usize)
+                }
+                Return => BenignInstructionType::Return,
+                _ => BenignInstructionType::Other,
+            })
         }
     }
 }
 
 fn type_from_load(instruction: &Instruction) -> Option<(DataType, u64)> {
     match instruction {
-        I32Load(arg) => Some((I32, arg.offset)),
+        I32Load(arg) | I32Load16u(arg) => Some((I32, arg.offset)),
         I64Load(arg) => Some((I64, arg.offset)),
         F32Load(arg) => Some((F32, arg.offset)),
         F64Load(arg) => Some((F64, arg.offset)),
@@ -220,18 +292,15 @@ fn is_other_memory_instruction(instruction: &Instruction) -> bool {
     }
 }
 
-pub enum SplitType {
-    Normal,
-    Block,
-}
-
 /// To be used at some point inside of a scope
 pub fn index_of_scope_end(
     instructions_with_index: &[(&Instruction, usize)],
 ) -> Result<usize, &'static str> {
     let mut scope_level = 1;
     for (i, &(instruction, _)) in instructions_with_index.iter().enumerate() {
-        if let Benign(Some(block_instruction_type)) = InstructionType::from(instruction) {
+        if let Benign(BenignInstructionType::Block(block_instruction_type)) =
+            InstructionType::from(instruction)
+        {
             scope_level += match block_instruction_type {
                 BlockInstructionType::End => -1,
                 BlockInstructionType::Block(_) => 1,

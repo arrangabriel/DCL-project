@@ -1,5 +1,5 @@
 (module
-    (func $f (type $tx_f) (param $tx i32) (param $state i32) (result i32)
+    (func $f (type $tx_f) (param $tx i32) (param $state i32)
         local.get $tx
         i64.load
         i32.wrap_i64
@@ -8,7 +8,6 @@
         local.get $tx
         i32.load offset=8
         i32.store
-        i32.const 0
     )
 
     (func $__enter (param i64 i64 i32) (result i32)
@@ -63,7 +62,7 @@
       i32.load
     )
 
-    (memory 1000) ;; What should the size of this memory actually be?
+    (memory 1)
     (export "__enter" (func $__enter))
     (export "__step" (func $__step))
     (export "__get_utx_addrs" (func $__get_utx_addrs))
@@ -72,5 +71,5 @@
     (export "__get_balance" (func $__get_balance))
     (type $tx_f (func (param i32 i32) (result i32)))
     (table 2 funcref)
-    (elem (i32.const 1) func $f) ;; Need to figure out this syntax
+    (elem (i32.const 1) func $f)
 )
