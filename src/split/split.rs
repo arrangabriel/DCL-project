@@ -17,7 +17,6 @@ pub fn setup_split<'a>(
     mut stack: Vec<StackValue>,
     scopes: &[Scope],
     mut deferred_splits: Vec<DeferredSplit<'a>>,
-    tail_instructions: &'static [&'static str],
     transformer: &mut WatEmitter,
 ) -> Result<Vec<DeferredSplit<'a>>, &'static str> {
     if let Some(new_split) = handle_pre_split(
@@ -28,7 +27,6 @@ pub fn setup_split<'a>(
         base_split_count,
         &mut stack,
         &scopes,
-        tail_instructions,
         transformer,
     ) {
         deferred_splits.push(new_split);
@@ -44,7 +42,6 @@ pub fn setup_split<'a>(
                 stack,
                 scopes.to_vec(), // This might not be correct
                 base_split_count + 1,
-                tail_instructions,
                 transformer,
             )?;
             deferred_splits.append(&mut sub_splits);
@@ -64,7 +61,6 @@ pub fn handle_pre_split<'a>(
     split_count: usize,
     stack: &mut Vec<StackValue>,
     scopes: &[Scope],
-    tail_instructions: &'static [&'static str],
     transformer: &mut WatEmitter,
 ) -> Option<DeferredSplit<'a>> {
     let (culprit_instruction, culprit_index) = culprit_instruction_with_index;
@@ -114,7 +110,7 @@ pub fn handle_pre_split<'a>(
     }
     transformer.emit_instruction("local.get $utx".into(), Some("Save naddr = 1".into()));
     transformer.emit_instruction(&format!("i32.const 1"), None);
-    transformer.emit_instruction("i32.store8 offset=63".into(), None);
+    transformer.emit_instruction("i32.store8 offset=35".into(), None);
     let stack_start = scopes.last().map(|scope| scope.stack_start).unwrap_or(0);
 
     transformer.emit_save_stack(&stack, stack_start, false);
@@ -143,7 +139,6 @@ pub fn handle_pre_split<'a>(
             local_types: local_types.to_vec(),
             stack: stack.to_vec(),
             scopes: scopes.to_vec(),
-            tail_instructions,
         })
     } else {
         None
@@ -175,9 +170,10 @@ pub fn handle_defered_split<'a>(
                     );
                     curr_stack_base = scope.stack_start;
                     let instruction = if let Some(name) = &scope.name {
-                        format!("(block ${name}")
+                        // TODO - we need to enforce either (block) or `block end`
+                        format!("block ${name}")
                     } else {
-                        "(block".into()
+                        "block".into()
                     };
                     transformer.emit_instruction(&instruction, None);
                     transformer.current_scope_level += 1;
@@ -231,7 +227,6 @@ pub fn handle_defered_split<'a>(
         deferred_split.stack,
         deferred_split.scopes,
         0,
-        deferred_split.tail_instructions,
         transformer,
     )
 }
@@ -244,5 +239,4 @@ pub struct DeferredSplit<'a> {
     local_types: Vec<DataType>,
     stack: Vec<StackValue>,
     scopes: Vec<Scope>,
-    tail_instructions: &'static [&'static str],
 }

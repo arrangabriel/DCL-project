@@ -1,14 +1,14 @@
 use std::fmt::{Display, Formatter};
 
-use wast::core::Instruction::LocalSet;
+use wast::core::Instruction::{I32Sub, LocalSet};
 use wast::core::{Instruction, ValType};
 use wast::token::Index;
 use Instruction::{
     Block, Br, BrIf, DataDrop, Drop, ElemDrop, End, F32Const, F32Gt, F32Load, F32Store, F64Const,
     F64Gt, F64Load, F64Store, GlobalGet, GlobalSet, I32Add, I32Const, I32Eq, I32Eqz, I32GtS,
     I32GtU, I32Load, I32Load16u, I32LtS, I32LtU, I32Mul, I32Ne, I32Shl, I32Store, I32Store8,
-    I32WrapI64, I64Add, I64Const, I64Eq, I64ExtendI32U, I64GtS, I64GtU, I64Load, I64LtS, I64LtU,
-    I64Mul, I64Ne, I64Store, I64Store8, I64Sub, I64Xor, LocalGet, LocalTee, MemoryCopy,
+    I32WrapI64, I32Xor, I64Add, I64Const, I64Eq, I64ExtendI32U, I64GtS, I64GtU, I64Load, I64LtS,
+    I64LtU, I64Mul, I64Ne, I64Store, I64Store8, I64Sub, I64Xor, LocalGet, LocalTee, MemoryCopy,
     MemoryDiscard, MemoryFill, MemoryGrow, MemoryInit, MemorySize, Return, TableCopy, TableFill,
     TableGet, TableGrow, TableInit, TableSet, TableSize,
 };
@@ -114,10 +114,10 @@ impl StackEffect {
             I64Const(_) => StackEffect::new(0, Some(I64), false, false),
             I32WrapI64 | I32Load(_) | I32Load16u(_) | I32Eqz => StackEffect::new(1, Some(I32), false, true),
             I32Const(_) => StackEffect::new(0, Some(I32), false, false),
-            I32Mul | I32Add | I32Eq | F64Gt | F32Gt |
+            I32Mul | I32Add | I32Sub | I32Eq | F64Gt | F32Gt |
             I32GtU | I32GtS | I64GtU | I64GtS | I32LtU |
             I32LtS | I64LtU | I64LtS | I64Eq | I32Ne | I64Ne |
-            I32Shl => StackEffect::new(2, Some(I32), false, false),
+            I32Shl | I32Xor => StackEffect::new(2, Some(I32), false, false),
             I64Mul | I64Add | I64Xor | I64Sub => StackEffect::new(2, Some(I64), false, false),
             I32Store(_) | I32Store8(_) => StackEffect::new(2, None, false, false),
             Drop | BrIf(_) | LocalSet(_) => StackEffect::new(1, None, false, false),
@@ -135,12 +135,11 @@ fn type_and_safety_from_param(index: &Index, local_types: &[DataType]) -> (DataT
         Index::Num(index, _) => {
             let index = *index as usize;
             let safe = index_is_param(index);
-            let utx_index = index + if index == 0 { 0 } else { 1 };
             let mut utx_locals = Vec::default();
             utx_locals.extend_from_slice(&UTX_LOCALS);
             utx_locals.extend_from_slice(local_types);
             let ty = *utx_locals
-                .get(utx_index)
+                .get(index)
                 .expect("Indexed get to locals should use in bounds index");
             (ty, safe)
         }

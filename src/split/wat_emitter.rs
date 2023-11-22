@@ -74,6 +74,7 @@ impl<'a> WatEmitter<'a> {
             self.emit_instruction(&format!("(local {local_types_str})"), None)
         }
 
+        // TODO - optimally emit locals
         if true {
             //self.skip_safe_splits {
             self.emit_all_locals();

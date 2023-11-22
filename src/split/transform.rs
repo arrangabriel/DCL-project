@@ -88,8 +88,6 @@ pub fn emit_transformed_wat(
     Ok(())
 }
 
-static UTX_NULL_RETURN: [&str; 1] = ["i32.const 0"];
-
 fn handle_top_level_func<'a>(
     func: &Func,
     instructions_with_index: &'a [(&Instruction, usize)],
@@ -98,9 +96,6 @@ fn handle_top_level_func<'a>(
     let name = match func.id.map(|id| id.name()) {
         None => gen_random_func_name(),
         Some(func_name) => {
-            // Maybe we also need to skip functions that dont have the type (tx, state) -> void
-            // but they also need to be split..
-            // don't wupport them for now ;)
             if func_name.starts_with(IGNORE_FUNC_PREFIX) {
                 transformer.emit_section(func.span.offset())?;
                 return Ok(Vec::default());
@@ -125,7 +120,6 @@ fn handle_top_level_func<'a>(
         Vec::default(),
         Vec::default(),
         0,
-        &UTX_NULL_RETURN,
         transformer,
     )
 }
@@ -147,7 +141,6 @@ pub fn handle_instructions<'a>(
     mut stack: Vec<StackValue>,
     mut scopes: Vec<Scope>,
     split_count: usize,
-    tail_instructions: &'static [&'static str],
     transformer: &mut WatEmitter,
 ) -> Result<Vec<DeferredSplit<'a>>, &'static str> {
     let deferred_splits: Vec<DeferredSplit> = Vec::default();
@@ -170,7 +163,6 @@ pub fn handle_instructions<'a>(
                         stack,
                         &scopes,
                         deferred_splits,
-                        tail_instructions,
                         transformer,
                     );
                 }
@@ -207,11 +199,10 @@ pub fn handle_instructions<'a>(
                             }
                         }
                     }
-                    BenignInstructionType::IndexedLocal(ty, mut index) => {
+                    BenignInstructionType::IndexedLocal(ty, index) => {
                         // After changins function signatures:
                         // tx, state -> tx, utx, state
                         // all locals after the first have to be incremented by one
-                        index += if index == 0 { 0 } else { 1 };
                         let instruction_str =
                             format!("local.{ty_str} {index}", ty_str = ty.as_str());
                         transformer.emit_instruction(&instruction_str, None);
@@ -230,9 +221,6 @@ pub fn handle_instructions<'a>(
         }
         StackEffect::from_instruction(instruction, local_types).update_stack(&mut stack)?;
         transformer.emit_instruction_by_index(instruction_index)?;
-    }
-    for tail_instruction in tail_instructions {
-        transformer.emit_instruction(tail_instruction, None);
     }
     transformer.emit_end_func();
     Ok(deferred_splits)
