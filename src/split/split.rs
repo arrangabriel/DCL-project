@@ -1,7 +1,5 @@
-use wast::core::Instruction;
-
-use crate::split::instruction_analysis::{
-    index_of_scope_end, DataType, MemoryInstructionType, SplitType, StackValue,
+use crate::split::function_analysis::{
+    index_of_scope_end, DataType, Instruction, MemoryInstructionType, SplitType, StackValue,
 };
 use crate::split::transform::{handle_instructions, setup_func, Scope, ScopeType};
 use crate::split::utils::*;
@@ -10,7 +8,7 @@ use crate::split::wat_emitter::WatEmitter;
 pub fn setup_split<'a>(
     base_name: &str,
     base_split_count: usize,
-    instructions: &'a [(&Instruction<'a>, usize)],
+    instructions: &'a [Instruction],
     local_types: &[DataType],
     culprit_instruction_with_index: (MemoryInstructionType, usize),
     split_type: SplitType,
@@ -56,7 +54,7 @@ pub fn setup_split<'a>(
 pub fn handle_pre_split<'a>(
     base_name: &str,
     culprit_instruction_with_index: (MemoryInstructionType, usize),
-    instructions: &'a [(&Instruction<'a>, usize)],
+    instructions: &'a [Instruction],
     local_types: &[DataType],
     split_count: usize,
     stack: &mut Vec<StackValue>,
@@ -135,7 +133,7 @@ pub fn handle_pre_split<'a>(
         Some(DeferredSplit {
             name,
             culprit_instruction,
-            instructions_with_index: instructions,
+            instructions,
             local_types: local_types.to_vec(),
             stack: stack.to_vec(),
             scopes: scopes.to_vec(),
@@ -151,7 +149,7 @@ pub fn handle_defered_split<'a>(
 ) -> Result<Vec<DeferredSplit<'a>>, &'static str> {
     setup_func(
         &deferred_split.name,
-        deferred_split.instructions_with_index,
+        deferred_split.instructions,
         &deferred_split.local_types,
         transformer,
     );
@@ -222,7 +220,7 @@ pub fn handle_defered_split<'a>(
     // This call recurses indirectly
     handle_instructions(
         &deferred_split.name,
-        deferred_split.instructions_with_index,
+        deferred_split.instructions,
         &deferred_split.local_types,
         deferred_split.stack,
         deferred_split.scopes,
@@ -235,7 +233,7 @@ pub fn handle_defered_split<'a>(
 pub struct DeferredSplit<'a> {
     name: String,
     culprit_instruction: MemoryInstructionType,
-    instructions_with_index: &'a [(&'a Instruction<'a>, usize)],
+    instructions: &'a [Instruction<'a>],
     local_types: Vec<DataType>,
     stack: Vec<StackValue>,
     scopes: Vec<Scope>,

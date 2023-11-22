@@ -1,18 +1,20 @@
 use std::io::Write;
 
-use wast::core::{Func, FuncKind, Instruction, ModuleField, ModuleKind};
+use crate::split::function_analysis;
+use wast::core::{ModuleField, ModuleKind};
 use wast::Wat;
 
-use crate::split::instruction_analysis::{
-    BenignInstructionType, BlockInstructionType, DataType, InstructionType, StackEffect, StackValue,
+use crate::split::function_analysis::{
+    BenignInstructionType, BlockInstructionType, DataType, Function, Instruction, InstructionType,
+    StackEffect, StackValue,
 };
 use crate::split::split::{handle_defered_split, setup_split, DeferredSplit};
-use crate::split::utils::{gen_random_func_name, IGNORE_FUNC_PREFIX};
+use crate::split::utils::MODULE_MEMBER_INDENT;
 use crate::split::wat_emitter::WatEmitter;
 
 pub fn emit_transformed_wat(
     wat: &Wat,
-    raw_text: &str,
+    lines: &[&str],
     writer: Box<dyn Write>,
     skip_safe_splits: bool,
 ) -> Result<(), &'static str> {
@@ -24,46 +26,24 @@ pub fn emit_transformed_wat(
         Wat::Component(_) => Err("Input module is component"),
     }?;
 
-    let mut transformer = WatEmitter::new(raw_text, writer, skip_safe_splits);
+    let mut transformer = WatEmitter::new(writer, skip_safe_splits);
     transformer.emit_module();
 
-    let mut functions_with_instructions = Vec::default();
-    let mut exports = Vec::default();
-    let mut types = Vec::default();
-    let mut globals = Vec::default();
+    let mut functions = Vec::default();
+    let mut saved_offsets = Vec::default();
     for field in module_fields {
         match field {
-            ModuleField::Func(func) => {
-                if let FuncKind::Inline {
-                    expression,
-                    locals: _,
-                } = &func.kind
-                {
-                    // Maybe this should happen inside of WatEmitter?
-                    let instruction_base_index = transformer.get_function_instructions_index(func);
-                    let instructions_with_index: Vec<(&Instruction, usize)> = expression
-                        .instrs
-                        .iter()
-                        .enumerate()
-                        .map(|(i, instruction)| (instruction, instruction_base_index + i))
-                        .collect();
-                    functions_with_instructions.push((func, instructions_with_index));
-                }
-            }
-            ModuleField::Export(export) => {
-                exports.push(export.span.offset());
-            }
-            ModuleField::Type(ty) => {
-                types.push(ty.span.offset());
-            }
-            ModuleField::Global(global) => globals.push(global.span.offset()),
+            ModuleField::Func(func) => functions.push(Function::new(func, lines)?),
+            ModuleField::Export(export) => saved_offsets.push(export.span.offset()),
+            ModuleField::Type(ty) => saved_offsets.push(ty.span.offset()),
+            ModuleField::Global(global) => saved_offsets.push(global.span.offset()),
             _ => { /* Other module fields might need to be handled at a later date */ }
         }
     }
 
     let mut deferred_splits = Vec::default();
-    for (func, instructions) in &functions_with_instructions {
-        let mut new_splits = handle_top_level_func(func, instructions, &mut transformer)?;
+    for func in &functions {
+        let mut new_splits = handle_top_level_func(func, &mut transformer)?;
         deferred_splits.append(&mut new_splits);
     }
 
@@ -74,14 +54,19 @@ pub fn emit_transformed_wat(
             .collect();
     }
 
-    for global_offset in globals {
-        transformer.emit_section(global_offset)?;
-    }
-    for export_offset in exports {
-        transformer.emit_section(export_offset)?;
-    }
-    for type_offset in types {
-        transformer.emit_section(type_offset)?;
+    for saved_offset in saved_offsets {
+        let line = function_analysis::get_line_from_offset(lines, saved_offset);
+        let extra_parens = line.chars().fold(0, |v, c| {
+            v + match c {
+                '(' => -1,
+                ')' => 1,
+                _ => 0,
+            }
+        }) as usize;
+        transformer.writeln(
+            &line[..line.len() - extra_parens].trim(),
+            MODULE_MEMBER_INDENT,
+        );
     }
 
     transformer.emit_end_module();
@@ -89,34 +74,24 @@ pub fn emit_transformed_wat(
 }
 
 fn handle_top_level_func<'a>(
-    func: &Func,
-    instructions_with_index: &'a [(&Instruction, usize)],
+    func: &'a Function,
     transformer: &mut WatEmitter,
 ) -> Result<Vec<DeferredSplit<'a>>, &'static str> {
-    let name = match func.id.map(|id| id.name()) {
-        None => gen_random_func_name(),
-        Some(func_name) => {
-            if func_name.starts_with(IGNORE_FUNC_PREFIX) {
-                transformer.emit_section(func.span.offset())?;
-                return Ok(Vec::default());
-            }
-            func_name.into()
-        }
-    };
-    let local_types = if let FuncKind::Inline { locals, .. } = &func.kind {
-        locals
-            .iter()
-            .map(|local| DataType::from(local.ty))
-            .collect()
-    } else {
-        Vec::default()
-    };
-    setup_func(&name, instructions_with_index, &local_types, transformer);
-    transformer.utx_function_names.push((0, name.clone()));
+    if func.ignore() {
+        transformer.emit_function(func);
+        return Ok(Vec::default());
+    }
+    setup_func(
+        &func.name,
+        &func.instructions,
+        &func.local_types,
+        transformer,
+    );
+    transformer.utx_function_names.push((0, func.name.clone()));
     handle_instructions(
-        &name,
-        instructions_with_index,
-        &local_types,
+        &func.name,
+        &func.instructions,
+        &func.local_types,
         Vec::default(),
         Vec::default(),
         0,
@@ -126,17 +101,17 @@ fn handle_top_level_func<'a>(
 
 pub fn setup_func(
     name: &str,
-    instructions_with_index: &[(&Instruction, usize)],
+    instructions: &[Instruction],
     local_types: &[DataType],
     transformer: &mut WatEmitter,
 ) {
     transformer.emit_utx_func_signature(name);
-    transformer.emit_locals(instructions_with_index, local_types);
+    transformer.emit_locals(instructions, local_types);
 }
 
 pub fn handle_instructions<'a>(
     name: &str,
-    instructions: &'a [(&Instruction<'a>, usize)],
+    instructions: &'a [Instruction],
     local_types: &[DataType],
     mut stack: Vec<StackValue>,
     mut scopes: Vec<Scope>,
@@ -145,7 +120,7 @@ pub fn handle_instructions<'a>(
 ) -> Result<Vec<DeferredSplit<'a>>, &'static str> {
     let deferred_splits: Vec<DeferredSplit> = Vec::default();
     transformer.current_scope_level = scopes.len();
-    for (i, &(instruction, instruction_index)) in instructions.iter().enumerate() {
+    for (i, instruction) in instructions.iter().enumerate() {
         let ty = InstructionType::from(instruction);
         match ty {
             InstructionType::Memory(ty) => {
@@ -158,7 +133,7 @@ pub fn handle_instructions<'a>(
                         // Only pass on instructions after the culprit
                         &instructions[i + 1..],
                         local_types,
-                        (ty, instruction_index),
+                        (ty, instruction.index),
                         split_type,
                         stack,
                         &scopes,
@@ -181,7 +156,7 @@ pub fn handle_instructions<'a>(
                                     name,
                                     stack_start,
                                 });
-                                transformer.emit_instruction_by_index(instruction_index)?;
+                                transformer.emit_instruction(instruction.raw_text, None);
                                 transformer.current_scope_level += 1;
                                 continue;
                             }
@@ -220,7 +195,7 @@ pub fn handle_instructions<'a>(
             }
         }
         StackEffect::from_instruction(instruction, local_types).update_stack(&mut stack)?;
-        transformer.emit_instruction_by_index(instruction_index)?;
+        transformer.emit_instruction(instruction.raw_text, None);
     }
     transformer.emit_end_func();
     Ok(deferred_splits)

@@ -1,25 +1,24 @@
 use std::io::Write;
 
 use itertools::Itertools;
-use wast::core::{Func, Instruction};
 
-use crate::split::instruction_analysis::{
+use crate::split::function_analysis::Function;
+use crate::split::function_analysis::Instruction;
+use crate::split::function_analysis::{
     DataType, InstructionType, MemoryInstructionType, StackEffect, StackValue,
 };
 use crate::split::utils::*;
 
-pub struct WatEmitter<'a> {
-    lines: Vec<&'a str>,
+pub struct WatEmitter {
     output_writer: Box<dyn Write>,
     pub skip_safe_splits: bool,
     pub utx_function_names: Vec<(usize, String)>,
     pub current_scope_level: usize,
 }
 
-impl<'a> WatEmitter<'a> {
-    pub fn new(raw_text: &'a str, output_writer: Box<dyn Write>, skip_safe_splits: bool) -> Self {
+impl WatEmitter {
+    pub fn new(output_writer: Box<dyn Write>, skip_safe_splits: bool) -> Self {
         Self {
-            lines: raw_text.split("\n").collect(),
             output_writer,
             skip_safe_splits,
             utx_function_names: Vec::default(),
@@ -27,52 +26,22 @@ impl<'a> WatEmitter<'a> {
         }
     }
 
-    fn writeln(&mut self, text: &str, indent: usize) {
+    pub fn writeln(&mut self, text: &str, indent: usize) {
         let formatted_text = format!("{}{text}\n", INDENTATION_STR.repeat(indent));
         self.output_writer
             .write(formatted_text.as_ref())
             .expect("Could not write");
     }
 
-    pub fn emit_section(&mut self, from: usize) -> Result<(), &'static str> {
-        let lines = &self.lines[self.get_line_from_offset(from)..];
-        let mut section = Vec::default();
-        let mut scope_count = 0;
-        'outer: for &line in lines {
-            let line = line.trim();
-            section.push(line);
-            for c in line.chars() {
-                scope_count += match c {
-                    '(' => 1,
-                    ')' => -1,
-                    _ => 0,
-                };
-                if scope_count == 0 {
-                    break 'outer;
-                }
-            }
-        }
-
-        for (i, line) in section.iter().enumerate() {
-            let indent = if i == 0 || i == section.len() - 1 {
-                MODULE_MEMBER_INDENT
-            } else {
-                INSTRUCTION_INDENT
-            };
-            self.writeln(line, indent);
-        }
-        Ok(())
-    }
-
-    pub fn emit_locals(
-        &mut self,
-        instructions_with_index: &[(&Instruction, usize)],
-        local_types: &[DataType],
-    ) {
+    fn emit_existing_locals(&mut self, local_types: &[DataType]) {
         let local_types_str = local_types.iter().map(|ty| ty.as_str()).join(" ");
         if !local_types_str.is_empty() {
             self.emit_instruction(&format!("(local {local_types_str})"), None)
         }
+    }
+
+    pub fn emit_locals(&mut self, instructions: &[Instruction], local_types: &[DataType]) {
+        self.emit_existing_locals(local_types);
 
         // TODO - optimally emit locals
         if true {
@@ -81,7 +50,7 @@ impl<'a> WatEmitter<'a> {
             return;
         }
         let mut stack = Vec::<DataType>::new();
-        for &(instruction, _) in instructions_with_index {
+        for instruction in instructions {
             if let InstructionType::Memory(instr_type) = InstructionType::from(instruction) {
                 stack.pop();
                 self.writeln(
@@ -135,20 +104,6 @@ impl<'a> WatEmitter<'a> {
             &format!("(func ${} {TRANSACTION_FUNCTION_SIGNATURE}", func_name),
             MODULE_MEMBER_INDENT,
         )
-    }
-
-    pub fn emit_instruction_by_index(
-        &mut self,
-        instruction_index: usize,
-    ) -> Result<(), &'static str> {
-        self.emit_instruction(
-            self.lines
-                .get(instruction_index)
-                .ok_or("Out of bounds access when trying to emit instruction from function")?
-                .trim(),
-            None,
-        );
-        Ok(())
     }
 
     pub fn emit_instruction(&mut self, instruction: &str, annotation: Option<String>) {
@@ -250,29 +205,14 @@ impl<'a> WatEmitter<'a> {
         self.writeln(")", MODULE_MEMBER_INDENT);
     }
 
-    /// Gives the index for the first instruction in a function.
-    /// To be used in conjunction with [WatEmitter::emit_instruction_from_function]
-    pub fn get_function_instructions_index(&self, func: &Func) -> usize {
-        let instruction_index = self.get_line_from_offset(func.span.offset()) + 1;
-        let local_lines = self.lines[instruction_index..]
-            .iter()
-            .take_while(|line| line.contains("(local"))
-            .count();
-
-        instruction_index + local_lines
-    }
-
-    fn get_line_from_offset(&self, offset: usize) -> usize {
-        let mut line_index = None;
-        let mut line_start = 0;
-        for (i, &line) in self.lines.iter().enumerate() {
-            let next_line_start = line_start + line.len() + 1;
-            if offset >= line_start && offset < next_line_start {
-                line_index = Some(i);
-                break;
+    pub fn emit_function(&mut self, func: &Function) {
+        self.writeln(func.signature, MODULE_MEMBER_INDENT);
+        if !&func.instructions.is_empty() {
+            self.emit_existing_locals(&func.local_types);
+            for instruction in &func.instructions {
+                self.emit_instruction(instruction.raw_text, None);
             }
-            line_start = next_line_start;
+            self.emit_end_func();
         }
-        line_index.expect("Line offset should not be out of bounds for raw text")
     }
 }

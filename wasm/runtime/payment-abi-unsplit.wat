@@ -134,7 +134,8 @@
   )
   (func $__get_utx_naddr (type 3) (result i32)
     i32.const 0
-    i32.load8_u offset=1075)
+    i32.load8_u offset=1075
+  )
   (func $__get_balance (type 4) (param i32) (result i64)
     local.get 0
     i32.const 3

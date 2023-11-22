@@ -61,7 +61,8 @@
     )
     (func $__get_utx_naddr (type 3) (result i32)
         i32.const 0
-    i32.load8_u offset=1075)
+        i32.load8_u offset=1075
+    )
     (func $__get_balance (type 4) (param i32) (result i64)
         local.get 0
         i32.const 3
@@ -475,6 +476,11 @@
         end
         i32.const 0
     )
+    (type (;0;) (func (param i32 i32 i32) (result i32)))
+    (type (;1;) (func))
+    (type (;2;) (func (param i32) (result i32)))
+    (type (;3;) (func (result i32)))
+    (type (;4;) (func (param i32) (result i64)))
     (global $__stack_pointer (mut i32) (i32.const 146624))
     (global (;1;) i32 (i32.const 1024))
     (global (;2;) i32 (i32.const 81088))
@@ -504,11 +510,6 @@
     (export "__heap_end" (global 7))
     (export "__memory_base" (global 8))
     (export "__table_base" (global 9))
-    (type (;0;) (func (param i32 i32 i32) (result i32)))
-    (type (;1;) (func))
-    (type (;2;) (func (param i32) (result i32)))
-    (type (;3;) (func (result i32)))
-    (type (;4;) (func (param i32) (result i64)))
     (table 13 funcref)
     (elem (i32.const 1) func $enter $enter_1 $enter_1_1 $enter_1_1_1 $enter_1_1_1_1 $enter_1_1_1_1_1 $enter_1_1_1_1_2 $enter_1_1_1_1_1_1 $enter_1_1_1_1_2_1 $enter_1_1_1_1_2_1_1 $enter_1_1_1_1_2_1_1_1 $enter_1_1_1_1_2_1_1_1_1)
     (memory 10)

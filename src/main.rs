@@ -27,7 +27,7 @@ fn main() {
             exit(1);
         });
 
-    parse_wast_string(wat_string.as_str(), config.print, config.skip_safe).unwrap_or_else(|err| {
+    parse_wast_string(wat_string.as_str(), config.skip_safe).unwrap_or_else(|err| {
         println!("Failed to parse: {:?}", err);
         exit(1);
     });
@@ -35,7 +35,6 @@ fn main() {
 
 struct Config {
     file_path: String,
-    print: bool,
     skip_safe: bool,
 }
 
@@ -46,13 +45,10 @@ fn parse_config(mut args: Vec<String>) -> Option<Config> {
         .position(|arg| !arg.starts_with("-"))
         .map(|pos| args.remove(pos))?;
 
-    let print = check_flag(&mut args, "-p");
-
     let skip_safe = check_flag(&mut args, "--skip-safe");
 
     Some(Config {
         file_path,
-        print,
         skip_safe,
     })
 }

@@ -1,5 +1,6 @@
 pub use transform::emit_transformed_wat;
-mod instruction_analysis;
+mod function_analysis;
+mod instruction_types;
 mod split;
 mod transform;
 mod utils;
