@@ -17,6 +17,8 @@ import("__get_balance") uint64_t __get_balance(uint32_t user);
 import("__get_utx_addrs") uint32_t __get_utx_addrs(uint8_t index);
 import("__get_utx_log2lens") uint8_t __get_utx_log2lens(uint8_t index);
 import("__get_utx_naddr") uint8_t __get_utx_naddr(void);
+import("__get_user") uint32_t __get_user(void);
+import("__get_transform_storage") char __get_transform_storage(uint32_t index);
 
 static void *enter(struct tx *tx, struct state *state)
 {
@@ -50,6 +52,19 @@ static void print_balance(uint32_t user)
     printf("balances[%u] = %llu\n", user, __get_balance(user));
 }
 
+static void print_state(void)
+{
+    printf("user = %u\n", __get_user());
+    printf("transform storage = \n");
+    for  (int i = 0; i < 512; i++)
+    {
+        printf("%hhx", __get_transform_storage(i));
+        if ((i + 1) % 4 == 0) printf(" ");
+        if ((i + 1) % 32 == 0) printf("\n");
+    }
+    printf("\n");
+}
+
 
 int main(void)
 {
@@ -66,6 +81,7 @@ int main(void)
 	callsite = enter(&tx, &state);
 	while (callsite != NULL) {
 		print_utx();
+		print_state();
 		callsite = step(callsite);
 	}
 

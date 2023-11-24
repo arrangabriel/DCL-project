@@ -1,5 +1,5 @@
 /target
-/wasm-example-files/wasm/*.wasm
+/wasm/runtime/*.wat
 /example-runtime-0
 /playground
 

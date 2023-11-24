@@ -7,7 +7,7 @@ use WastInstruction::{
     Block, Br, BrIf, Drop, End, F32Const, F32Gt, F64Const, F64Gt, I32Add, I32Const, I32Eq, I32Eqz,
     I32GtS, I32GtU, I32Load, I32Load16u, I32LtS, I32LtU, I32Mul, I32Ne, I32Shl, I32Store,
     I32Store8, I32WrapI64, I32Xor, I64Add, I64Const, I64Eq, I64ExtendI32U, I64GtS, I64GtU, I64Load,
-    I64LtS, I64LtU, I64Mul, I64Ne, I64Sub, I64Xor, LocalGet, LocalTee, Return,
+    I64Load32u, I64LtS, I64LtU, I64Mul, I64Ne, I64Sub, I64Xor, LocalGet, LocalTee, Return,
 };
 
 use crate::split::instruction_types::InstructionType::Benign;
@@ -91,7 +91,7 @@ impl StackEffect {
                 StackEffect::new(0, Some(ty), is_safe, true)
             }
             LocalTee(_) => StackEffect::new(0, None, false, false),
-            I64Load(_) | I64ExtendI32U => StackEffect::new(1, Some(DataType::I64), false, false),
+            I64Load(_) | I64Load32u(_) | I64ExtendI32U => StackEffect::new(1, Some(DataType::I64), false, false),
             I64Const(_) => StackEffect::new(0, Some(DataType::I64), false, false),
             I32WrapI64 | I32Load(_) | I32Load16u(_) | I32Eqz => StackEffect::new(1, Some(DataType::I32), false, true),
             I32Const(_) => StackEffect::new(0, Some(DataType::I32), false, false),

@@ -27,7 +27,7 @@ fn main() {
             exit(1);
         });
 
-    parse_wast_string(wat_string.as_str(), config.skip_safe).unwrap_or_else(|err| {
+    parse_wast_string(wat_string.as_str(), 6, config.skip_safe).unwrap_or_else(|err| {
         println!("Failed to parse: {:?}", err);
         exit(1);
     });

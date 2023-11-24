@@ -4,9 +4,9 @@ use crate::split::function_analysis;
 use wast::core::{ModuleField, ModuleKind};
 use wast::Wat;
 
-use crate::split::function_analysis::{
-    BenignInstructionType, BlockInstructionType, DataType, Function, Instruction, InstructionType,
-    StackEffect, StackValue,
+use crate::split::function_analysis::{Function, StackEffect, StackValue};
+use crate::split::instruction_types::{
+    BenignInstructionType, BlockInstructionType, DataType, Instruction, InstructionType,
 };
 use crate::split::split::{handle_defered_split, setup_split, DeferredSplit};
 use crate::split::utils::MODULE_MEMBER_INDENT;
@@ -17,6 +17,7 @@ pub fn emit_transformed_wat(
     lines: &[&str],
     writer: Box<dyn Write>,
     skip_safe_splits: bool,
+    state_size: usize,
 ) -> Result<(), &'static str> {
     let module_fields = match wat {
         Wat::Module(module) => match &module.kind {
@@ -26,7 +27,7 @@ pub fn emit_transformed_wat(
         Wat::Component(_) => Err("Input module is component"),
     }?;
 
-    let mut transformer = WatEmitter::new(writer, skip_safe_splits);
+    let mut transformer = WatEmitter::new(writer, state_size, skip_safe_splits);
     transformer.emit_module();
 
     let mut functions = Vec::default();
@@ -150,7 +151,12 @@ pub fn handle_instructions<'a>(
                             BlockInstructionType::Block(name) => {
                                 let prev_stack_start =
                                     scopes.last().map(|scope| scope.stack_start).unwrap_or(0);
-                                transformer.emit_save_stack(&stack, prev_stack_start, true);
+                                transformer.emit_save_stack(
+                                    transformer.stack_base,
+                                    &stack,
+                                    prev_stack_start,
+                                    true,
+                                );
                                 scopes.push(Scope {
                                     ty: ScopeType::Block,
                                     name,

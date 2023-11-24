@@ -1,6 +1,6 @@
 WASI_SDK_PATH := /Users/arrankg/dev/university/DCLproject/wasi-sdk-20.0
 CC := ${WASI_SDK_PATH}/bin/clang
-CFLAGS := -O3 -I./
+CFLAGS := -g -O3 -I./
 MAKEFLAGS += --no-print-directory
 
 check:

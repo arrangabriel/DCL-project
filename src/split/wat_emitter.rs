@@ -2,25 +2,28 @@ use std::io::Write;
 
 use itertools::Itertools;
 
-use crate::split::function_analysis::Function;
-use crate::split::function_analysis::Instruction;
-use crate::split::function_analysis::{
-    DataType, InstructionType, MemoryInstructionType, StackEffect, StackValue,
+use crate::split::function_analysis::{Function, StackEffect, StackValue};
+use crate::split::instruction_types::{
+    DataType, Instruction, InstructionType, MemoryInstructionType,
 };
 use crate::split::utils::*;
 
 pub struct WatEmitter {
     output_writer: Box<dyn Write>,
     pub skip_safe_splits: bool,
+    pub state_base: usize,
+    pub stack_base: usize,
     pub utx_function_names: Vec<(usize, String)>,
     pub current_scope_level: usize,
 }
 
 impl WatEmitter {
-    pub fn new(output_writer: Box<dyn Write>, skip_safe_splits: bool) -> Self {
+    pub fn new(output_writer: Box<dyn Write>, state_base: usize, skip_safe_splits: bool) -> Self {
         Self {
             output_writer,
             skip_safe_splits,
+            state_base,
+            stack_base: state_base + 8,
             utx_function_names: Vec::default(),
             current_scope_level: 0,
         }
@@ -114,11 +117,17 @@ impl WatEmitter {
         self.writeln(&instruction, INSTRUCTION_INDENT + self.current_scope_level);
     }
 
-    pub fn emit_save_stack(&mut self, stack: &[StackValue], from: usize, keep_on_stack: bool) {
+    pub fn emit_save_stack(
+        &mut self,
+        stack_base: usize,
+        stack: &[StackValue],
+        from: usize,
+        keep_stack: bool,
+    ) {
         let already_saved_size: usize = stack[..from].iter().map(|value| value.ty.size()).sum();
-        let mut offset = STATE_BASE_OFFSET + already_saved_size;
+        let mut offset = stack_base + already_saved_size;
         let stack = &stack[from..];
-        let set_flavour = if keep_on_stack { "tee" } else { "set" };
+        let set_flavour = if keep_stack { "tee" } else { "set" };
         let instructions = stack.iter().rev().flat_map(|StackValue { ty, .. }| {
             let ty_str = ty.as_str();
             offset += ty.size();
@@ -131,21 +140,33 @@ impl WatEmitter {
         });
 
         for (i, instruction) in instructions.enumerate() {
-            let annotation = if i == 0 {
-                let stack = stack.iter().map(|value| value.to_string()).join(", ");
-                Some(format!("Save stack - [{stack}]"))
-            } else {
-                None
+            let annotation = match i {
+                0 => Some(format!(
+                    "Save stack - [{stack}]",
+                    stack = stack.iter().map(|value| value.to_string()).join(", ")
+                )),
+                3 => Some(format!(
+                    "First {n} bytes reserved for user defined state struct and potential store value",
+                    n = stack_base
+                )),
+                _ => None,
             };
             self.emit_instruction(&instruction, annotation);
         }
     }
 
-    pub fn emit_restore_stack(&mut self, stack: &[StackValue], from: usize, until: usize) {
-        let mut offset: usize = stack[..until]
+    pub fn emit_restore_stack(
+        &mut self,
+        stack_base: usize,
+        stack: &[StackValue],
+        from: usize,
+        until: usize,
+    ) {
+        let stack_size: usize = stack[..until]
             .iter()
             .map(|StackValue { ty, .. }| ty.size())
             .sum();
+        let mut offset = stack_base + stack_size;
         let stack = &stack[from..until];
         let instructions = stack.iter().flat_map(|StackValue { ty, .. }| {
             offset -= ty.size();
@@ -156,11 +177,16 @@ impl WatEmitter {
         });
 
         for (i, instruction) in instructions.enumerate() {
-            let annotation = if i == 0 {
-                let stack = stack.iter().map(|value| value.to_string()).join(", ");
-                Some(format!("Restore stack - [{stack}]"))
-            } else {
-                None
+            let annotation = match i {
+                0 => Some(format!(
+                    "Restore stack - [{stack}]",
+                    stack = stack.iter().map(|value| value.to_string()).join(", ")
+                )),
+                1 => Some(format!(
+                    "First {n} bytes reserved for user defined state struct and potential store value",
+                    n = stack_base
+                )),
+                _ => None,
             };
             self.emit_instruction(&instruction, annotation);
         }

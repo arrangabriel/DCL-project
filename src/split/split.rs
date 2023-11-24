@@ -1,6 +1,5 @@
-use crate::split::function_analysis::{
-    index_of_scope_end, DataType, Instruction, MemoryInstructionType, SplitType, StackValue,
-};
+use crate::split::function_analysis::{index_of_scope_end, SplitType, StackValue};
+use crate::split::instruction_types::{DataType, Instruction, MemoryInstructionType};
 use crate::split::transform::{handle_instructions, setup_func, Scope, ScopeType};
 use crate::split::utils::*;
 use crate::split::wat_emitter::WatEmitter;
@@ -38,7 +37,7 @@ pub fn setup_split<'a>(
                 &instructions[scope_end..],
                 local_types,
                 stack,
-                scopes.to_vec(), // This might not be correct
+                scopes.to_vec(),
                 base_split_count + 1,
                 transformer,
             )?;
@@ -86,14 +85,23 @@ pub fn handle_pre_split<'a>(
             let get_value = format!("local.get ${stack_juggler_local_name}");
             let set_address = format!("local.set ${ADDRESS_LOCAL_NAME}");
             let get_address = format!("local.get ${ADDRESS_LOCAL_NAME}");
-            let store_data_type = format!("{ty}.store");
+            let store_data_type = format!(
+                "{ty}.store offset={state_offset}",
+                state_offset = transformer.state_base
+            );
             let offset_const = format!("i32.const {offset}");
             vec![
                 (set_value, Some("Save value for store".into())),
                 (set_address, Some("Save address for store".into())),
                 ("local.get $state".into(), None),
                 (get_value, None),
-                (store_data_type, None),
+                (
+                    store_data_type,
+                    Some(format!(
+                        "First {n} bytes reserved for user defined state struct",
+                        n = transformer.state_base
+                    )),
+                ),
                 ("local.get $utx".into(), None),
                 (get_address, None),
                 (offset_const, Some("Convert =offset to value".into())),
@@ -111,7 +119,7 @@ pub fn handle_pre_split<'a>(
     transformer.emit_instruction("i32.store8 offset=35".into(), None);
     let stack_start = scopes.last().map(|scope| scope.stack_start).unwrap_or(0);
 
-    transformer.emit_save_stack(&stack, stack_start, false);
+    transformer.emit_save_stack(transformer.stack_base, &stack, stack_start, false);
 
     // Check if a split has already been created for this instruction,
     // if so simply return that table index
@@ -154,7 +162,12 @@ pub fn handle_defered_split<'a>(
         transformer,
     );
     if deferred_split.scopes.is_empty() {
-        transformer.emit_restore_stack(&deferred_split.stack, 0, deferred_split.stack.len());
+        transformer.emit_restore_stack(
+            transformer.stack_base,
+            &deferred_split.stack,
+            0,
+            deferred_split.stack.len(),
+        );
     } else {
         transformer.current_scope_level = 0;
         let mut curr_stack_base = 0;
@@ -162,6 +175,7 @@ pub fn handle_defered_split<'a>(
             match scope.ty {
                 ScopeType::Block => {
                     transformer.emit_restore_stack(
+                        transformer.stack_base,
                         &deferred_split.stack,
                         curr_stack_base,
                         scope.stack_start,
@@ -169,9 +183,9 @@ pub fn handle_defered_split<'a>(
                     curr_stack_base = scope.stack_start;
                     let instruction = if let Some(name) = &scope.name {
                         // TODO - we need to enforce either (block) or `block end`
-                        format!("block ${name}")
+                        format!("(block ${name}")
                     } else {
-                        "block".into()
+                        "(block".into()
                     };
                     transformer.emit_instruction(&instruction, None);
                     transformer.current_scope_level += 1;
@@ -179,6 +193,7 @@ pub fn handle_defered_split<'a>(
             }
         }
         transformer.emit_restore_stack(
+            transformer.stack_base,
             &deferred_split.stack,
             curr_stack_base,
             deferred_split.stack.len(),
@@ -196,7 +211,11 @@ pub fn handle_defered_split<'a>(
         }
         MemoryInstructionType::Store { ty, .. } => {
             let store_data_type = format!("{}.store", ty.as_str());
-            let load_data_type = format!("{}.load", ty.as_str());
+            let load_data_type = format!(
+                "{ty}.load offset={state_base}",
+                ty = ty.as_str(),
+                state_base = transformer.state_base
+            );
             vec![
                 (
                     "local.get $utx".into(),
