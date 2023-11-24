@@ -54,7 +54,7 @@ pub fn handle_pre_split<'a>(
     base_name: &str,
     culprit_instruction_with_index: (MemoryInstructionType, usize),
     instructions: &'a [Instruction],
-    local_types: &[DataType],
+    locals: &[DataType],
     split_count: usize,
     stack: &mut Vec<StackValue>,
     scopes: &[Scope],
@@ -119,7 +119,13 @@ pub fn handle_pre_split<'a>(
     transformer.emit_instruction("i32.store8 offset=35".into(), None);
     let stack_start = scopes.last().map(|scope| scope.stack_start).unwrap_or(0);
 
-    transformer.emit_save_stack(transformer.stack_base, &stack, stack_start, false);
+    transformer.emit_save_stack_and_locals(
+        transformer.stack_base,
+        &stack,
+        stack_start,
+        false,
+        locals,
+    );
 
     // Check if a split has already been created for this instruction,
     // if so simply return that table index
@@ -142,7 +148,7 @@ pub fn handle_pre_split<'a>(
             name,
             culprit_instruction,
             instructions,
-            local_types: local_types.to_vec(),
+            locals: locals.to_vec(),
             stack: stack.to_vec(),
             scopes: scopes.to_vec(),
         })
@@ -158,8 +164,13 @@ pub fn handle_defered_split<'a>(
     setup_func(
         &deferred_split.name,
         deferred_split.instructions,
-        &deferred_split.local_types,
+        &deferred_split.locals,
         transformer,
+    );
+    transformer.emit_restore_locals(
+        &deferred_split.locals,
+        transformer.stack_base,
+        &deferred_split.stack,
     );
     if deferred_split.scopes.is_empty() {
         transformer.emit_restore_stack(
@@ -240,7 +251,7 @@ pub fn handle_defered_split<'a>(
     handle_instructions(
         &deferred_split.name,
         deferred_split.instructions,
-        &deferred_split.local_types,
+        &deferred_split.locals,
         deferred_split.stack,
         deferred_split.scopes,
         0,
@@ -253,7 +264,7 @@ pub struct DeferredSplit<'a> {
     name: String,
     culprit_instruction: MemoryInstructionType,
     instructions: &'a [Instruction<'a>],
-    local_types: Vec<DataType>,
+    locals: Vec<DataType>,
     stack: Vec<StackValue>,
     scopes: Vec<Scope>,
 }

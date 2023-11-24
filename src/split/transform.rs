@@ -103,17 +103,17 @@ fn handle_top_level_func<'a>(
 pub fn setup_func(
     name: &str,
     instructions: &[Instruction],
-    local_types: &[DataType],
+    locals: &[DataType],
     transformer: &mut WatEmitter,
 ) {
     transformer.emit_utx_func_signature(name);
-    transformer.emit_locals(instructions, local_types);
+    transformer.emit_locals(instructions, locals);
 }
 
 pub fn handle_instructions<'a>(
     name: &str,
     instructions: &'a [Instruction],
-    local_types: &[DataType],
+    locals: &[DataType],
     mut stack: Vec<StackValue>,
     mut scopes: Vec<Scope>,
     split_count: usize,
@@ -133,7 +133,7 @@ pub fn handle_instructions<'a>(
                         split_count + deferred_splits.len(),
                         // Only pass on instructions after the culprit
                         &instructions[i + 1..],
-                        local_types,
+                        locals,
                         (ty, instruction.index),
                         split_type,
                         stack,
@@ -151,11 +151,12 @@ pub fn handle_instructions<'a>(
                             BlockInstructionType::Block(name) => {
                                 let prev_stack_start =
                                     scopes.last().map(|scope| scope.stack_start).unwrap_or(0);
-                                transformer.emit_save_stack(
+                                transformer.emit_save_stack_and_locals(
                                     transformer.stack_base,
                                     &stack,
                                     prev_stack_start,
                                     true,
+                                    locals,
                                 );
                                 scopes.push(Scope {
                                     ty: ScopeType::Block,
@@ -187,7 +188,7 @@ pub fn handle_instructions<'a>(
                         let instruction_str =
                             format!("local.{ty_str} {index}", ty_str = ty.as_str());
                         transformer.emit_instruction(&instruction_str, None);
-                        StackEffect::from_instruction(instruction, local_types)
+                        StackEffect::from_instruction(instruction, locals)
                             .update_stack(&mut stack)?;
                         continue;
                     }
@@ -200,7 +201,7 @@ pub fn handle_instructions<'a>(
                 }
             }
         }
-        StackEffect::from_instruction(instruction, local_types).update_stack(&mut stack)?;
+        StackEffect::from_instruction(instruction, locals).update_stack(&mut stack)?;
         transformer.emit_instruction(instruction.raw_text, None);
     }
     transformer.emit_end_func();

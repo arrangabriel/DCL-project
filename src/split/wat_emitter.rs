@@ -43,8 +43,8 @@ impl WatEmitter {
         }
     }
 
-    pub fn emit_locals(&mut self, instructions: &[Instruction], local_types: &[DataType]) {
-        self.emit_existing_locals(local_types);
+    pub fn emit_locals(&mut self, instructions: &[Instruction], locals: &[DataType]) {
+        self.emit_existing_locals(locals);
 
         // TODO - optimally emit locals
         if true {
@@ -78,7 +78,7 @@ impl WatEmitter {
                 });
                 break;
             }
-            let effect = StackEffect::from_instruction(instruction, local_types);
+            let effect = StackEffect::from_instruction(instruction, locals);
             for _ in 0..effect.remove_n {
                 stack.pop();
             }
@@ -117,29 +117,31 @@ impl WatEmitter {
         self.writeln(&instruction, INSTRUCTION_INDENT + self.current_scope_level);
     }
 
-    pub fn emit_save_stack(
+    pub fn emit_save_stack_and_locals(
         &mut self,
         stack_base: usize,
         stack: &[StackValue],
         from: usize,
         keep_stack: bool,
+        locals: &[DataType],
     ) {
         let already_saved_size: usize = stack[..from].iter().map(|value| value.ty.size()).sum();
         let mut offset = stack_base + already_saved_size;
         let stack = &stack[from..];
         let set_flavour = if keep_stack { "tee" } else { "set" };
-        let instructions = stack.iter().rev().flat_map(|StackValue { ty, .. }| {
+        let stack_save_instructions = stack.iter().rev().flat_map(|StackValue { ty, .. }| {
             let ty_str = ty.as_str();
-            offset += ty.size();
-            [
+            let instructions = [
                 format!("local.{set_flavour} ${ty_str}_{STACK_JUGGLER_NAME}"),
                 format!("local.get $state"),
                 format!("local.get ${ty_str}_{STACK_JUGGLER_NAME}"),
-                format!("{ty_str}.store offset={}", offset - ty.size()),
-            ]
+                format!("{ty_str}.store offset={offset}"),
+            ];
+            offset += ty.size();
+            instructions
         });
 
-        for (i, instruction) in instructions.enumerate() {
+        for (i, instruction) in stack_save_instructions.enumerate() {
             let annotation = match i {
                 0 => Some(format!(
                     "Save stack - [{stack}]",
@@ -148,6 +150,31 @@ impl WatEmitter {
                 3 => Some(format!(
                     "First {n} bytes reserved for user defined state struct and potential store value",
                     n = stack_base
+                )),
+                _ => None,
+            };
+            self.emit_instruction(&instruction, annotation);
+        }
+
+        let local_save_instructions = locals.iter().enumerate().flat_map(|(i, ty)| {
+            let ty_str = ty.as_str();
+            let instructions = [
+                format!("local.get $state"),
+                format!(
+                    "local.get {local_index}",
+                    local_index = i + UTX_FUNC_PARAM_COUNT
+                ),
+                format!("{ty_str}.store offset={offset}"),
+            ];
+            offset += ty.size();
+            instructions
+        });
+
+        for (i, instruction) in local_save_instructions.enumerate() {
+            let annotation = match i {
+                0 => Some(format!(
+                    "Save locals - [{locals}]",
+                    locals = locals.iter().map(|ty| ty.as_str()).join(", ")
                 )),
                 _ => None,
             };
@@ -187,6 +214,43 @@ impl WatEmitter {
                     n = stack_base
                 )),
                 _ => None,
+            };
+            self.emit_instruction(&instruction, annotation);
+        }
+    }
+
+    pub fn emit_restore_locals(
+        &mut self,
+        locals: &[DataType],
+        stack_base: usize,
+        stack: &[StackValue],
+    ) {
+        let mut offset = stack_base
+            + stack
+                .iter()
+                .map(|StackValue { ty, .. }| ty.size())
+                .sum::<usize>();
+        let instructions = locals.iter().enumerate().flat_map(|(i, ty)| {
+            let ty_str = ty.as_str();
+            let instructions = [
+                format!("local.get $state"),
+                format!("{ty_str}.load offset={offset}"),
+                format!(
+                    "local.set {local_index}",
+                    local_index = i + UTX_FUNC_PARAM_COUNT
+                ),
+            ];
+            offset += ty.size();
+            instructions
+        });
+        for (i, instruction) in instructions.enumerate() {
+            let annotation = if i == 0 {
+                Some(format!(
+                    "Restore locals [{locals}]",
+                    locals = locals.iter().map(|ty| ty.as_str()).join(", ")
+                ))
+            } else {
+                None
             };
             self.emit_instruction(&instruction, annotation);
         }
