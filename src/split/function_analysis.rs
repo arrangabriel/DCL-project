@@ -16,7 +16,7 @@ use crate::split::instruction_types::{
 };
 
 use crate::split::utils::{
-    gen_random_func_name, index_is_param, name_is_param, IGNORE_FUNC_PREFIX,
+    gen_random_func_name, index_is_param, name_is_param, IGNORE_FUNC_PREFIX, UTX_LOCALS,
 };
 
 fn type_and_safety_from_param(index: &Index, local_types: &[DataType]) -> (DataType, bool) {
@@ -108,8 +108,6 @@ impl StackEffect {
         }
     }
 }
-
-const UTX_LOCALS: [DataType; 3] = [DataType::I32, DataType::I32, DataType::I32];
 
 pub enum SplitType {
     Normal,

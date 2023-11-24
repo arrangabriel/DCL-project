@@ -1,9 +1,10 @@
+use crate::split::instruction_types::DataType;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 
 pub const TRANSACTION_FUNCTION_SIGNATURE: &str =
     "(type $utx_f) (param $tx i32) (param $utx i32) (param $state i32) (result i32)";
-pub const UTX_FUNC_PARAM_COUNT: usize = 3;
+pub const UTX_LOCALS: [DataType; 3] = [DataType::I32, DataType::I32, DataType::I32];
 pub const IGNORE_FUNC_PREFIX: &str = "__";
 pub const ADDRESS_LOCAL_NAME: &str = "memory_address";
 pub const STACK_JUGGLER_NAME: &str = "local";

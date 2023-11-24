@@ -8,17 +8,23 @@ use crate::split::instruction_types::{
 };
 use crate::split::utils::*;
 
-pub struct WatEmitter {
-    output_writer: Box<dyn Write>,
+pub struct WatEmitter<'a> {
+    output_writer: &'a mut dyn Write,
     pub skip_safe_splits: bool,
     pub state_base: usize,
     pub stack_base: usize,
     pub utx_function_names: Vec<(usize, String)>,
     pub current_scope_level: usize,
+    explain_splits: bool,
 }
 
-impl WatEmitter {
-    pub fn new(output_writer: Box<dyn Write>, state_base: usize, skip_safe_splits: bool) -> Self {
+impl<'a> WatEmitter<'a> {
+    pub fn new(
+        output_writer: &'a mut dyn Write,
+        state_base: usize,
+        skip_safe_splits: bool,
+        explain_splits: bool,
+    ) -> Self {
         Self {
             output_writer,
             skip_safe_splits,
@@ -26,6 +32,7 @@ impl WatEmitter {
             stack_base: state_base + 8,
             utx_function_names: Vec::default(),
             current_scope_level: 0,
+            explain_splits,
         }
     }
 
@@ -56,10 +63,7 @@ impl WatEmitter {
         for instruction in instructions {
             if let InstructionType::Memory(instr_type) = InstructionType::from(instruction) {
                 stack.pop();
-                self.writeln(
-                    &format!("(local ${ADDRESS_LOCAL_NAME} i32)"),
-                    INSTRUCTION_INDENT,
-                );
+                self.emit_instruction(&format!("(local ${ADDRESS_LOCAL_NAME} i32)"), None);
                 let mut types: Vec<DataType> = Vec::new();
                 if let MemoryInstructionType::Store { ty, .. } = instr_type {
                     stack.pop();
@@ -67,14 +71,14 @@ impl WatEmitter {
                 }
                 types.append(&mut stack);
                 types.into_iter().unique().for_each(|data_type| {
-                    self.writeln(
+                    self.emit_instruction(
                         &format!(
                             "(local ${}_{STACK_JUGGLER_NAME} {})",
                             data_type.as_str(),
                             data_type.as_str()
                         ),
-                        INSTRUCTION_INDENT,
-                    )
+                        None,
+                    );
                 });
                 break;
             }
@@ -89,15 +93,12 @@ impl WatEmitter {
     }
 
     pub fn emit_all_locals(&mut self) {
-        self.writeln(
-            &format!("(local ${ADDRESS_LOCAL_NAME} i32)"),
-            INSTRUCTION_INDENT,
-        );
+        self.emit_instruction(&format!("(local ${ADDRESS_LOCAL_NAME} i32)"), None);
         let types = [DataType::I32, DataType::I64, DataType::F32, DataType::F64];
         for ty in types {
-            self.writeln(
-                &format!("(local ${ty}_{STACK_JUGGLER_NAME} {ty})", ty = ty.as_str(),),
-                INSTRUCTION_INDENT,
+            self.emit_instruction(
+                &format!("(local ${ty}_{STACK_JUGGLER_NAME} {ty})", ty = ty.as_str()),
+                None,
             );
         }
     }
@@ -110,9 +111,13 @@ impl WatEmitter {
     }
 
     pub fn emit_instruction(&mut self, instruction: &str, annotation: Option<String>) {
-        let instruction = match annotation {
-            Some(annotation) => format!("{instruction:<30};;{annotation}"),
-            None => instruction.into(),
+        let instruction = if self.explain_splits {
+            match annotation {
+                Some(annotation) => format!("{instruction:<30};;{annotation}"),
+                None => instruction.into(),
+            }
+        } else {
+            instruction.into()
         };
         self.writeln(&instruction, INSTRUCTION_INDENT + self.current_scope_level);
     }
@@ -162,7 +167,7 @@ impl WatEmitter {
                 format!("local.get $state"),
                 format!(
                     "local.get {local_index}",
-                    local_index = i + UTX_FUNC_PARAM_COUNT
+                    local_index = i + UTX_LOCALS.len()
                 ),
                 format!("{ty_str}.store offset={offset}"),
             ];
@@ -237,7 +242,7 @@ impl WatEmitter {
                 format!("{ty_str}.load offset={offset}"),
                 format!(
                     "local.set {local_index}",
-                    local_index = i + UTX_FUNC_PARAM_COUNT
+                    local_index = i + UTX_LOCALS.len()
                 ),
             ];
             offset += ty.size();

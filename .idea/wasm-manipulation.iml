@@ -5,6 +5,7 @@
       <sourceFolder url="file://$MODULE_DIR$/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/src/module_analysis/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/src/split/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
       <excludeFolder url="file://$MODULE_DIR$/src/module_analysis/target" />
       <excludeFolder url="file://$MODULE_DIR$/src/split/target" />

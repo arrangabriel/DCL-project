@@ -15,9 +15,10 @@ use crate::split::wat_emitter::WatEmitter;
 pub fn emit_transformed_wat(
     wat: &Wat,
     lines: &[&str],
-    writer: Box<dyn Write>,
+    writer: &mut dyn Write,
     skip_safe_splits: bool,
     state_size: usize,
+    explain_splits: bool,
 ) -> Result<(), &'static str> {
     let module_fields = match wat {
         Wat::Module(module) => match &module.kind {
@@ -27,7 +28,7 @@ pub fn emit_transformed_wat(
         Wat::Component(_) => Err("Input module is component"),
     }?;
 
-    let mut transformer = WatEmitter::new(writer, state_size, skip_safe_splits);
+    let mut transformer = WatEmitter::new(writer, state_size, skip_safe_splits, explain_splits);
     transformer.emit_module();
 
     let mut functions = Vec::default();

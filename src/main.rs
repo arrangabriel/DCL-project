@@ -1,10 +1,10 @@
-use std::env;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 use std::process::exit;
+use std::{env, io};
 
-use wasm_manipulation::parse_wast_string;
+use wasm_manipulation::transform_wat_string;
 
 fn main() {
     let config = parse_config(env::args().collect()).unwrap_or_else(|| {
@@ -27,7 +27,14 @@ fn main() {
             exit(1);
         });
 
-    parse_wast_string(wat_string.as_str(), 6, config.skip_safe).unwrap_or_else(|err| {
+    transform_wat_string(
+        wat_string.as_str(),
+        &mut io::stdout(),
+        6,
+        config.skip_safe,
+        true,
+    )
+    .unwrap_or_else(|err| {
         println!("Failed to parse: {:?}", err);
         exit(1);
     });
