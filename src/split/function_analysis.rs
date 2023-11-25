@@ -19,6 +19,77 @@ use crate::split::utils::{
     gen_random_func_name, index_is_param, name_is_param, IGNORE_FUNC_PREFIX, UTX_LOCALS,
 };
 
+pub struct Function<'a> {
+    pub name: String,
+    pub signature: &'a str,
+    pub local_types: Vec<DataType>,
+    pub instructions: Vec<Instruction<'a>>,
+}
+
+impl<'a> Function<'a> {
+    pub fn new(func: &'a Func, lines: &'a [&'a str]) -> Result<Self, &'static str> {
+        let name = match func.id.map(|id| id.name()) {
+            None => gen_random_func_name(),
+            Some(func_name) => func_name.into(),
+        };
+        let (wast_instructions, local_types) =
+            if let FuncKind::Inline { expression, locals } = &func.kind {
+                let local_types = locals
+                    .iter()
+                    .map(|local| DataType::from(local.ty))
+                    .collect::<Vec<DataType>>();
+                Ok((expression.instrs.iter().as_slice(), local_types))
+            } else {
+                Err("FuncKind is not inline")
+            }?;
+
+        let function_line_index = get_line_index_from_offset(&lines, func.span.offset());
+        let signature_line = lines[function_line_index].trim();
+        let function_member_base_line_index = function_line_index + 1;
+        let instruction_base_line_index = function_member_base_line_index
+            + lines[function_member_base_line_index..]
+                .iter()
+                .take_while(|line| line.contains("(local"))
+                .count();
+
+        let mut instructions_with_stack = Vec::default();
+        let mut current_stack_state = Vec::default();
+        for instruction in wast_instructions {
+            instructions_with_stack.push((instruction, current_stack_state.to_vec()));
+            StackEffect::from_wast_instruction(instruction, &local_types)
+                .update_stack(&mut current_stack_state)?;
+        }
+
+        let mut instructions = Vec::default();
+        for (i, ((instruction, stack), raw_text)) in instructions_with_stack
+            .into_iter()
+            .zip(
+                &lines[instruction_base_line_index
+                    ..instruction_base_line_index + wast_instructions.len()],
+            )
+            .enumerate()
+        {
+            instructions.push(Instruction::new(
+                instruction,
+                raw_text,
+                instruction_base_line_index + i,
+                stack,
+            ));
+        }
+
+        Ok(Function {
+            name,
+            local_types,
+            signature: signature_line,
+            instructions,
+        })
+    }
+
+    pub fn ignore(&self) -> bool {
+        self.name.starts_with(IGNORE_FUNC_PREFIX)
+    }
+}
+
 fn type_and_safety_from_param(index: &Index, local_types: &[DataType]) -> (DataType, bool) {
     match index {
         Index::Num(index, _) => {
@@ -82,8 +153,8 @@ impl StackEffect {
         Ok(())
     }
 
-    pub fn from_instruction(instruction: &Instruction, local_types: &[DataType]) -> Self {
-        match instruction.instr {
+    pub fn from_wast_instruction(instruction: &WastInstruction, local_types: &[DataType]) -> Self {
+        match instruction {
             Return // The return might have to be handled with care
             | End(_) | Block(_) | Br(_) => StackEffect::new(0, None, false, false),
             LocalGet(index) => {
@@ -104,8 +175,12 @@ impl StackEffect {
             Drop | BrIf(_) | LocalSet(_) => StackEffect::new(1, None, false, false),
             F64Const(_) => StackEffect::new(0, Some(DataType::F64), false, false),
             F32Const(_) => StackEffect::new(0, Some(DataType::F32), false, false),
-            _ => panic!("Unsupported instruction read when producing StackEffect - {:?}", instruction.instr),
+            _ => panic!("Unsupported instruction read when producing StackEffect - {:?}", instruction),
         }
+    }
+
+    pub fn from_instruction(instruction: &Instruction, local_types: &[DataType]) -> Self {
+        Self::from_wast_instruction(instruction.instr, local_types)
     }
 }
 
@@ -133,58 +208,6 @@ pub fn index_of_scope_end(instructions: &[Instruction]) -> Result<usize, &'stati
         }
     }
     Err("Unbalanced scope delimiters")
-}
-
-pub struct Function<'a> {
-    pub(crate) name: String,
-    pub signature: &'a str,
-    pub local_types: Vec<DataType>,
-    pub instructions: Vec<Instruction<'a>>,
-}
-
-impl<'a> Function<'a> {
-    pub fn new(func: &'a Func, lines: &'a [&'a str]) -> Result<Self, &'static str> {
-        let name = match func.id.map(|id| id.name()) {
-            None => gen_random_func_name(),
-            Some(func_name) => func_name.into(),
-        };
-        let (instructions, local_types) =
-            if let FuncKind::Inline { expression, locals } = &func.kind {
-                let local_types = locals
-                    .iter()
-                    .map(|local| DataType::from(local.ty))
-                    .collect();
-                Ok((expression.instrs.iter().as_slice(), local_types))
-            } else {
-                Err("FuncKind is not inline")
-            }?;
-        let function_index = get_line_index_from_offset(&lines, func.span.offset());
-        let signature = lines[function_index].trim();
-        let function_member_base_index = function_index + 1;
-        let instruction_base_index = function_member_base_index
-            + lines[function_member_base_index..]
-                .iter()
-                .take_while(|line| line.contains("(local"))
-                .count();
-        let instructions: Vec<Instruction> = instructions
-            .iter()
-            .zip(&lines[instruction_base_index..instruction_base_index + instructions.len()])
-            .enumerate()
-            .map(|(i, (instruction, raw_text))| {
-                Instruction::new(instruction, raw_text, instruction_base_index + i)
-            })
-            .collect();
-        Ok(Function {
-            name,
-            local_types,
-            signature,
-            instructions,
-        })
-    }
-
-    pub fn ignore(&self) -> bool {
-        self.name.starts_with(IGNORE_FUNC_PREFIX)
-    }
 }
 
 fn get_line_index_from_offset<'a>(lines: &'a [&'a str], offset: usize) -> usize {

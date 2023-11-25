@@ -135,7 +135,7 @@ pub fn handle_instructions<'a>(
                         // Only pass on instructions after the culprit
                         &instructions[i + 1..],
                         locals,
-                        (ty, instruction.index),
+                        (instruction, ty, instruction.index),
                         split_type,
                         stack,
                         &scopes,
@@ -154,7 +154,7 @@ pub fn handle_instructions<'a>(
                                     scopes.last().map(|scope| scope.stack_start).unwrap_or(0);
                                 transformer.emit_save_stack_and_locals(
                                     transformer.stack_base,
-                                    &stack,
+                                    &instruction.stack,
                                     prev_stack_start,
                                     true,
                                     locals,

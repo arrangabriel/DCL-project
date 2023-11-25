@@ -164,15 +164,22 @@ pub struct Instruction<'a> {
     pub instr: &'a WastInstruction<'a>,
     pub raw_text: &'a str,
     pub index: usize,
+    pub stack: Vec<StackValue>,
 }
 
 impl<'a> Instruction<'a> {
-    pub fn new(instr: &'a WastInstruction<'a>, raw_text: &'a str, index: usize) -> Self {
+    pub fn new(
+        instr: &'a WastInstruction<'a>,
+        raw_text: &'a str,
+        index: usize,
+        stack: Vec<StackValue>,
+    ) -> Self {
         let raw_text = raw_text.trim();
         Instruction {
             instr,
             raw_text,
             index,
+            stack,
         }
     }
 }

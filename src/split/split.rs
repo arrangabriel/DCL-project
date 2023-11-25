@@ -9,7 +9,7 @@ pub fn setup_split<'a>(
     base_split_count: usize,
     instructions: &'a [Instruction],
     local_types: &[DataType],
-    culprit_instruction_with_index: (MemoryInstructionType, usize),
+    culprit_instruction_with_index: (&Instruction, MemoryInstructionType, usize),
     split_type: SplitType,
     mut stack: Vec<StackValue>,
     scopes: &[Scope],
@@ -22,7 +22,6 @@ pub fn setup_split<'a>(
         instructions,
         local_types,
         base_split_count,
-        &mut stack,
         &scopes,
         transformer,
     ) {
@@ -52,33 +51,32 @@ pub fn setup_split<'a>(
 
 pub fn handle_pre_split<'a>(
     base_name: &str,
-    culprit_instruction_with_index: (MemoryInstructionType, usize),
+    culprit_instruction_with_index: (&Instruction, MemoryInstructionType, usize),
     instructions: &'a [Instruction],
     locals: &[DataType],
     split_count: usize,
-    stack: &mut Vec<StackValue>,
     scopes: &[Scope],
     transformer: &mut WatEmitter,
 ) -> Option<DeferredSplit<'a>> {
-    let (culprit_instruction, culprit_index) = culprit_instruction_with_index;
-    let pre_split = match culprit_instruction {
+    let (culprit, culprit_type, culprit_index) = culprit_instruction_with_index;
+    let (pre_split, to_remove) = match culprit_type {
         MemoryInstructionType::Load { offset, .. } => {
-            stack.pop();
             let set_address = format!("local.set ${ADDRESS_LOCAL_NAME}");
             let get_address = format!("local.get ${ADDRESS_LOCAL_NAME}");
             let offset_const = format!("i32.const {offset}");
-            vec![
-                (set_address, Some("Save address for load".into())),
-                ("local.get $utx".into(), None),
-                (get_address, None),
-                (offset_const, Some("Convert =offset to value".into())),
-                ("i32.add".into(), None),
-                ("i32.store".into(), None),
-            ]
+            (
+                vec![
+                    (set_address, Some("Save address for load".into())),
+                    ("local.get $utx".into(), None),
+                    (get_address, None),
+                    (offset_const, Some("Convert =offset to value".into())),
+                    ("i32.add".into(), None),
+                    ("i32.store".into(), None),
+                ],
+                1,
+            )
         }
         MemoryInstructionType::Store { ty, offset } => {
-            stack.pop();
-            stack.pop();
             let ty = ty.as_str();
             let stack_juggler_local_name = format!("{ty}_{STACK_JUGGLER_NAME}");
             let set_value = format!("local.set ${stack_juggler_local_name}");
@@ -90,24 +88,27 @@ pub fn handle_pre_split<'a>(
                 state_offset = transformer.state_base
             );
             let offset_const = format!("i32.const {offset}");
-            vec![
-                (set_value, Some("Save value for store".into())),
-                (set_address, Some("Save address for store".into())),
-                ("local.get $state".into(), None),
-                (get_value, None),
-                (
-                    store_data_type,
-                    Some(format!(
-                        "First {n} bytes reserved for user defined state struct",
-                        n = transformer.state_base
-                    )),
-                ),
-                ("local.get $utx".into(), None),
-                (get_address, None),
-                (offset_const, Some("Convert =offset to value".into())),
-                ("i32.add".into(), None),
-                ("i32.store".into(), None),
-            ]
+            (
+                vec![
+                    (set_value, Some("Save value for store".into())),
+                    (set_address, Some("Save address for store".into())),
+                    ("local.get $state".into(), None),
+                    (get_value, None),
+                    (
+                        store_data_type,
+                        Some(format!(
+                            "First {n} bytes reserved for user defined state struct",
+                            n = transformer.state_base
+                        )),
+                    ),
+                    ("local.get $utx".into(), None),
+                    (get_address, None),
+                    (offset_const, Some("Convert =offset to value".into())),
+                    ("i32.add".into(), None),
+                    ("i32.store".into(), None),
+                ],
+                2,
+            )
         }
     };
 
@@ -118,10 +119,11 @@ pub fn handle_pre_split<'a>(
     transformer.emit_instruction(&format!("i32.const 1"), None);
     transformer.emit_instruction("i32.store8 offset=35".into(), None);
     let stack_start = scopes.last().map(|scope| scope.stack_start).unwrap_or(0);
+    let stack = &culprit.stack[..culprit.stack.len() - to_remove];
 
     transformer.emit_save_stack_and_locals(
         transformer.stack_base,
-        &stack,
+        stack,
         stack_start,
         false,
         locals,
@@ -146,7 +148,7 @@ pub fn handle_pre_split<'a>(
             .push((culprit_index, name.clone()));
         Some(DeferredSplit {
             name,
-            culprit_instruction,
+            culprit_instruction: culprit_type,
             instructions,
             locals: locals.to_vec(),
             stack: stack.to_vec(),
