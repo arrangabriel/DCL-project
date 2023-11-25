@@ -4,7 +4,7 @@ use crate::split::function_analysis;
 use wast::core::{ModuleField, ModuleKind};
 use wast::Wat;
 
-use crate::split::function_analysis::{Function, StackEffect, StackValue};
+use crate::split::function_analysis::Function;
 use crate::split::instruction_types::{
     BenignInstructionType, BlockInstructionType, DataType, Instruction, InstructionType,
 };
@@ -95,7 +95,6 @@ fn handle_top_level_func<'a>(
         &func.instructions,
         &func.local_types,
         Vec::default(),
-        Vec::default(),
         0,
         transformer,
     )
@@ -115,7 +114,6 @@ pub fn handle_instructions<'a>(
     name: &str,
     instructions: &'a [Instruction],
     locals: &[DataType],
-    mut stack: Vec<StackValue>,
     mut scopes: Vec<Scope>,
     split_count: usize,
     transformer: &mut WatEmitter,
@@ -127,7 +125,7 @@ pub fn handle_instructions<'a>(
         match ty {
             InstructionType::Memory(ty) => {
                 if let Some(split_type) =
-                    ty.needs_split(&stack, &scopes, transformer.skip_safe_splits)?
+                    ty.needs_split(&instruction.stack, &scopes, transformer.skip_safe_splits)?
                 {
                     return setup_split(
                         name,
@@ -137,9 +135,7 @@ pub fn handle_instructions<'a>(
                         locals,
                         (instruction, ty, instruction.index),
                         split_type,
-                        stack,
                         &scopes,
-                        deferred_splits,
                         transformer,
                     );
                 }
@@ -147,7 +143,7 @@ pub fn handle_instructions<'a>(
             InstructionType::Benign(ty) => {
                 match ty {
                     BenignInstructionType::Block(ty) => {
-                        let stack_start = stack.len();
+                        let stack_start = instruction.stack.len();
                         match ty {
                             BlockInstructionType::Block(name) => {
                                 let prev_stack_start =
@@ -175,7 +171,9 @@ pub fn handle_instructions<'a>(
                                 match scope.ty {
                                     ScopeType::Block => {
                                         // Slice off popped scope stack
-                                        stack = stack[..scope.stack_start].to_vec();
+                                        //stack = stack[..scope.stack_start].to_vec();
+                                        // TODO - this needs to be handled in setup
+                                        // returns in perticular
                                     }
                                 }
                                 transformer.current_scope_level -= 1;
@@ -189,12 +187,12 @@ pub fn handle_instructions<'a>(
                         let instruction_str =
                             format!("local.{ty_str} {index}", ty_str = ty.as_str());
                         transformer.emit_instruction(&instruction_str, None);
-                        StackEffect::from_instruction(instruction, locals)
-                            .update_stack(&mut stack)?;
+                        //StackEffect::from_instruction(instruction, locals)
+                        //    .update_stack(&mut stack)?;
                         continue;
                     }
                     BenignInstructionType::Return => {
-                        if stack.is_empty() {
+                        if instruction.stack.is_empty() {
                             transformer.emit_instruction("i32.const 0", Some("Return NULL".into()));
                         }
                     }
@@ -202,7 +200,7 @@ pub fn handle_instructions<'a>(
                 }
             }
         }
-        StackEffect::from_instruction(instruction, locals).update_stack(&mut stack)?;
+        //StackEffect::from_instruction(instruction, locals).update_stack(&mut stack)?;
         transformer.emit_instruction(instruction.raw_text, None);
     }
     transformer.emit_end_func();
