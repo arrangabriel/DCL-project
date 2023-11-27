@@ -1,8 +1,10 @@
-use crate::split::function_analysis::{index_of_scope_end, SplitType, StackValue};
-use crate::split::instruction_types::{DataType, Instruction, MemoryInstructionType};
-use crate::split::transform::{handle_instructions, setup_func, Scope, ScopeType};
-use crate::split::utils::*;
-use crate::split::wat_emitter::WatEmitter;
+use crate::chop_up::function::index_of_scope_end;
+use crate::chop_up::instruction::{DataType, MemoryInstructionType};
+use crate::chop_up::transform::{handle_instructions, setup_func};
+use crate::chop_up::emit::WatEmitter;
+use crate::chop_up::instruction_stream::{Instruction, Scope, ScopeType, StackValue};
+#[allow(unused_imports)] // This is due to a bug in my linter...
+use crate::chop_up::constants::{ADDRESS_LOCAL_NAME, STACK_JUGGLER_NAME};
 
 pub fn setup_split<'a>(
     base_name: &str,
@@ -10,8 +12,6 @@ pub fn setup_split<'a>(
     instructions: &'a [Instruction],
     locals: &[DataType],
     culprit_instruction_with_index: (&Instruction, MemoryInstructionType, usize),
-    split_type: SplitType,
-    current_scopes: &[Scope],
     transformer: &mut WatEmitter,
 ) -> Result<Vec<DeferredSplit<'a>>, &'static str> {
     let mut deferred_splits = Vec::default();
@@ -21,28 +21,23 @@ pub fn setup_split<'a>(
         instructions,
         locals,
         split_count,
-        &current_scopes,
         transformer,
     ) {
         deferred_splits.push(new_split);
     }
-    match split_type {
-        SplitType::Block => {
-            transformer.emit_instruction("return".into(), None);
-            let scope_end = index_of_scope_end(instructions)?;
-            let mut sub_splits = handle_instructions(
-                base_name,
-                &instructions[scope_end..],
-                locals,
-                current_scopes.to_vec(),
-                split_count + 1,
-                transformer,
-            )?;
-            deferred_splits.append(&mut sub_splits);
-        }
-        SplitType::Normal => {
-            transformer.emit_end_func();
-        }
+    if culprit_instruction_with_index.0.scopes.is_empty() {
+        transformer.emit_end_func();
+    } else {
+        transformer.emit_instruction("return", None);
+        let scope_end = index_of_scope_end(instructions)?;
+        let mut sub_splits = handle_instructions(
+            base_name,
+            &instructions[scope_end..],
+            locals,
+            split_count + 1,
+            transformer,
+        )?;
+        deferred_splits.append(&mut sub_splits);
     }
     Ok(deferred_splits)
 }
@@ -53,7 +48,6 @@ pub fn handle_pre_split<'a>(
     instructions: &'a [Instruction],
     locals: &[DataType],
     split_count: usize,
-    scopes: &[Scope],
     transformer: &mut WatEmitter,
 ) -> Option<DeferredSplit<'a>> {
     let (culprit, culprit_type, culprit_index) = culprit_instruction_with_index;
@@ -113,11 +107,15 @@ pub fn handle_pre_split<'a>(
     for (pre_split_instr, annotation) in pre_split {
         transformer.emit_instruction(&pre_split_instr, annotation);
     }
-    transformer.emit_instruction("local.get $utx".into(), Some("Save naddr = 1".into()));
-    transformer.emit_instruction(&format!("i32.const 1"), None);
-    transformer.emit_instruction("i32.store8 offset=35".into(), None);
+    transformer.emit_instruction("local.get $utx", Some("Save naddr = 1".into()));
+    transformer.emit_instruction("i32.const 1", None);
+    transformer.emit_instruction("i32.store8 offset=35", None);
 
-    let stack_start = scopes.last().map(|scope| scope.stack_start).unwrap_or(0);
+    let stack_start = culprit
+        .scopes
+        .last()
+        .map(|scope| scope.stack_start)
+        .unwrap_or(0);
     let stack = &culprit.stack[..culprit.stack.len() - to_remove];
     transformer.emit_save_stack_and_locals(
         transformer.stack_base,
@@ -139,25 +137,25 @@ pub fn handle_pre_split<'a>(
         Some("Return index to next microtransaction".into()),
     );
 
-    if let None = existing_index {
+    if existing_index.is_none() {
         let name = format!("{base_name}_{split_index}", split_index = split_count + 1);
         transformer
             .utx_function_names
             .push((culprit_index, name.clone()));
         Some(DeferredSplit {
             name,
-            culprit_instruction: culprit_type,
+            culprit_type,
             instructions,
             locals: locals.to_vec(),
             saved_stack: stack.to_vec(),
-            scopes: scopes.to_vec(),
+            scopes: culprit.scopes.to_vec(),
         })
     } else {
         None
     }
 }
 
-pub fn handle_defered_split<'a>(
+pub fn handle_deferred_split<'a>(
     deferred_split: DeferredSplit<'a>,
     transformer: &mut WatEmitter,
 ) -> Result<Vec<DeferredSplit<'a>>, &'static str> {
@@ -174,7 +172,6 @@ pub fn handle_defered_split<'a>(
     );
     if deferred_split.scopes.is_empty() {
         transformer.emit_restore_stack(
-            transformer.stack_base,
             &deferred_split.saved_stack,
             0,
             deferred_split.saved_stack.len(),
@@ -186,7 +183,6 @@ pub fn handle_defered_split<'a>(
             match scope.ty {
                 ScopeType::Block => {
                     transformer.emit_restore_stack(
-                        transformer.stack_base,
                         &deferred_split.saved_stack,
                         curr_stack_base,
                         scope.stack_start,
@@ -204,13 +200,12 @@ pub fn handle_defered_split<'a>(
             }
         }
         transformer.emit_restore_stack(
-            transformer.stack_base,
             &deferred_split.saved_stack,
             curr_stack_base,
             deferred_split.saved_stack.len(),
         );
     }
-    let post_split: Vec<(String, Option<String>)> = match deferred_split.culprit_instruction {
+    let post_split: Vec<(String, Option<String>)> = match deferred_split.culprit_type {
         MemoryInstructionType::Load { ty, .. } => {
             let load_data_type = format!("{}.load", ty.as_str());
             vec![
@@ -251,7 +246,6 @@ pub fn handle_defered_split<'a>(
         &deferred_split.name,
         deferred_split.instructions,
         &deferred_split.locals,
-        deferred_split.scopes,
         0,
         transformer,
     )
@@ -260,7 +254,7 @@ pub fn handle_defered_split<'a>(
 #[derive(Clone)]
 pub struct DeferredSplit<'a> {
     name: String,
-    culprit_instruction: MemoryInstructionType,
+    culprit_type: MemoryInstructionType,
     instructions: &'a [Instruction<'a>],
     locals: Vec<DataType>,
     saved_stack: Vec<StackValue>,

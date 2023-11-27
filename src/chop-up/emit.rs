@@ -2,11 +2,12 @@ use std::io::Write;
 
 use itertools::Itertools;
 
-use crate::split::function_analysis::{Function, StackEffect, StackValue};
-use crate::split::instruction_types::{
-    DataType, Instruction, InstructionType, MemoryInstructionType,
+use crate::chop_up::function::Function;
+use crate::chop_up::instruction::{
+    DataType, InstructionType, MemoryInstructionType,
 };
-use crate::split::utils::*;
+use crate::chop_up::constants::*;
+use crate::chop_up::instruction_stream::{Instruction, StackEffect, StackValue};
 
 pub struct WatEmitter<'a> {
     output_writer: &'a mut dyn Write,
@@ -39,7 +40,7 @@ impl<'a> WatEmitter<'a> {
     pub fn writeln(&mut self, text: &str, indent: usize) {
         let formatted_text = format!("{}{text}\n", INDENTATION_STR.repeat(indent));
         self.output_writer
-            .write(formatted_text.as_ref())
+            .write_all(formatted_text.as_ref())
             .expect("Could not write");
     }
 
@@ -138,7 +139,7 @@ impl<'a> WatEmitter<'a> {
             let ty_str = ty.as_str();
             let instructions = [
                 format!("local.{set_flavour} ${ty_str}_{STACK_JUGGLER_NAME}"),
-                format!("local.get $state"),
+                "local.get $state".to_string(),
                 format!("local.get ${ty_str}_{STACK_JUGGLER_NAME}"),
                 format!("{ty_str}.store offset={offset}"),
             ];
@@ -164,7 +165,7 @@ impl<'a> WatEmitter<'a> {
         let local_save_instructions = locals.iter().enumerate().flat_map(|(i, ty)| {
             let ty_str = ty.as_str();
             let instructions = [
-                format!("local.get $state"),
+                "local.get $state".to_string(),
                 format!(
                     "local.get {local_index}",
                     local_index = i + UTX_LOCALS.len()
@@ -187,23 +188,17 @@ impl<'a> WatEmitter<'a> {
         }
     }
 
-    pub fn emit_restore_stack(
-        &mut self,
-        stack_base: usize,
-        stack: &[StackValue],
-        from: usize,
-        until: usize,
-    ) {
+    pub fn emit_restore_stack(&mut self, stack: &[StackValue], from: usize, until: usize) {
         let stack_size: usize = stack[..until]
             .iter()
             .map(|StackValue { ty, .. }| ty.size())
             .sum();
-        let mut offset = stack_base + stack_size;
+        let mut offset = self.stack_base + stack_size;
         let stack = &stack[from..until];
         let instructions = stack.iter().flat_map(|StackValue { ty, .. }| {
             offset -= ty.size();
             [
-                format!("local.get $state"),
+                "local.get $state".to_string(),
                 format!("{}.load offset={offset}", ty.as_str()),
             ]
         });
@@ -216,7 +211,7 @@ impl<'a> WatEmitter<'a> {
                 )),
                 1 => Some(format!(
                     "First {n} bytes reserved for user defined state struct and potential store value",
-                    n = stack_base
+                    n = self.stack_base
                 )),
                 _ => None,
             };
@@ -238,7 +233,7 @@ impl<'a> WatEmitter<'a> {
         let instructions = locals.iter().enumerate().flat_map(|(i, ty)| {
             let ty_str = ty.as_str();
             let instructions = [
-                format!("local.get $state"),
+                "local.get $state".to_string(),
                 format!("{ty_str}.load offset={offset}"),
                 format!(
                     "local.set {local_index}",
@@ -262,7 +257,7 @@ impl<'a> WatEmitter<'a> {
     }
 
     pub fn emit_funcref_table(&mut self) {
-        if self.utx_function_names.len() > 0 {
+        if !self.utx_function_names.is_empty() {
             self.writeln(
                 &format!("(table {} funcref)", self.utx_function_names.len() + 1,),
                 MODULE_MEMBER_INDENT,
@@ -311,3 +306,8 @@ impl<'a> WatEmitter<'a> {
         }
     }
 }
+
+const TRANSACTION_FUNCTION_SIGNATURE: &str = "(type $utx_f) (param $tx i32) (param $utx i32) (param $state i32) (result i32)";
+const INSTRUCTION_INDENT: usize = 2;
+const MODULE_INDENT: usize = 0;
+const INDENTATION_STR: &str = "    ";

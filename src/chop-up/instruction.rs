@@ -1,8 +1,8 @@
-use crate::split::function_analysis::{SplitType, StackValue};
-use crate::split::instruction_types::DataType::*;
-use crate::split::instruction_types::InstructionType::{Benign, Memory};
-use crate::split::instruction_types::LocalType::{Get, Set, Tee};
-use crate::split::transform::Scope;
+use crate::chop_up::instruction_stream::StackValue;
+use crate::chop_up::instruction::DataType::*;
+use crate::chop_up::instruction::InstructionType::{Benign, Memory};
+use crate::chop_up::instruction::LocalType::{Get, Set, Tee};
+use crate::chop_up::instruction_stream::Instruction;
 use wast::core::Instruction::LocalSet;
 use wast::core::{Instruction as WastInstruction, ValType};
 use wast::token::Index;
@@ -12,6 +12,95 @@ use WastInstruction::{
     MemoryCopy, MemoryDiscard, MemoryFill, MemoryGrow, MemoryInit, MemorySize, Return, TableCopy,
     TableFill, TableGet, TableGrow, TableInit, TableSet, TableSize,
 };
+
+#[derive(PartialEq, Clone)]
+pub enum InstructionType {
+    Memory(MemoryInstructionType),
+    Benign(BenignInstructionType),
+}
+
+impl From<&WastInstruction<'_>> for InstructionType {
+    fn from(value: &WastInstruction<'_>) -> Self {
+        if let Some((ty, offset)) = type_from_load(value) {
+            Memory(MemoryInstructionType::Load { ty, offset })
+        } else if let Some((ty, offset)) = type_from_store(value) {
+            Memory(MemoryInstructionType::Store { ty, offset })
+        } else if is_other_memory_instruction(value) {
+            panic!(
+                "Unsupported instruction read when producing InstructionType - {:?}",
+                value
+            )
+        } else {
+            Benign(match value {
+                Block(id) => BenignInstructionType::Block(BlockInstructionType::Block(
+                    id.label.map(|id| id.name().into()),
+                )),
+                End(_) => BenignInstructionType::Block(BlockInstructionType::End),
+                LocalGet(Index::Num(index, _)) => {
+                    BenignInstructionType::IndexedLocal(Get, *index as usize)
+                }
+                LocalSet(Index::Num(index, _)) => {
+                    BenignInstructionType::IndexedLocal(Set, *index as usize)
+                }
+                LocalTee(Index::Num(index, _)) => {
+                    BenignInstructionType::IndexedLocal(Tee, *index as usize)
+                }
+                Return => BenignInstructionType::Return,
+                _ => BenignInstructionType::Other,
+            })
+        }
+    }
+}
+
+impl From<&Instruction<'_>> for InstructionType {
+    fn from(value: &Instruction) -> Self {
+        Self::from(value.instr)
+    }
+}
+
+#[derive(PartialEq, Clone)]
+pub enum BenignInstructionType {
+    Block(BlockInstructionType),
+    IndexedLocal(LocalType, usize),
+    Return,
+    Other,
+}
+
+#[derive(PartialEq, Clone)]
+pub enum BlockInstructionType {
+    End,
+    Block(Option<String>),
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum MemoryInstructionType {
+    Load { ty: DataType, offset: u64 },
+    Store { ty: DataType, offset: u64 },
+}
+
+impl MemoryInstructionType {
+    pub fn needs_split(
+        &self,
+        stack: &[StackValue],
+        skip_safe_splits: bool,
+    ) -> Result<bool, &'static str> {
+        let needs_split = match self {
+            MemoryInstructionType::Load { .. } => {
+                let last_is_safe = stack
+                    .last()
+                    .ok_or("Load with empty stack - program is malformed")?
+                    .is_safe;
+                if last_is_safe && skip_safe_splits {
+                    false
+                } else {
+                    true
+                }
+            }
+            MemoryInstructionType::Store { .. } => true,
+        };
+        return Ok(needs_split);
+    }
+}
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub enum DataType {
@@ -52,98 +141,6 @@ impl From<ValType<'_>> for DataType {
 }
 
 #[derive(PartialEq, Clone)]
-pub enum InstructionType {
-    Memory(MemoryInstructionType),
-    Benign(BenignInstructionType),
-}
-
-impl From<&Instruction<'_>> for InstructionType {
-    fn from(value: &Instruction) -> Self {
-        if let Some((ty, offset)) = type_from_load(value) {
-            Memory(MemoryInstructionType::Load { ty, offset })
-        } else if let Some((ty, offset)) = type_from_store(value) {
-            Memory(MemoryInstructionType::Store { ty, offset })
-        } else if is_other_memory_instruction(value) {
-            panic!(
-                "Unsupported instruction read when producing InstructionType - {:?}",
-                value.instr
-            )
-        } else {
-            Benign(match value.instr {
-                Block(id) => BenignInstructionType::Block(BlockInstructionType::Block(
-                    id.label.map(|id| id.name().into()),
-                )),
-                End(_) => BenignInstructionType::Block(BlockInstructionType::End),
-                LocalGet(Index::Num(index, _)) => {
-                    BenignInstructionType::IndexedLocal(Get, *index as usize)
-                }
-                LocalSet(Index::Num(index, _)) => {
-                    BenignInstructionType::IndexedLocal(Set, *index as usize)
-                }
-                LocalTee(Index::Num(index, _)) => {
-                    BenignInstructionType::IndexedLocal(Tee, *index as usize)
-                }
-                Return => BenignInstructionType::Return,
-                _ => BenignInstructionType::Other,
-            })
-        }
-    }
-}
-
-#[derive(PartialEq, Clone)]
-pub enum BenignInstructionType {
-    Block(BlockInstructionType),
-    IndexedLocal(LocalType, usize),
-    Return,
-    Other,
-}
-
-#[derive(PartialEq, Clone)]
-pub enum BlockInstructionType {
-    End,
-    Block(Option<String>),
-}
-
-#[derive(Clone, Copy, PartialEq)]
-pub enum MemoryInstructionType {
-    Load { ty: DataType, offset: u64 },
-    Store { ty: DataType, offset: u64 },
-}
-
-impl MemoryInstructionType {
-    pub fn needs_split(
-        &self,
-        stack: &[StackValue],
-        scopes: &[Scope],
-        skip_safe_splits: bool,
-    ) -> Result<Option<SplitType>, &'static str> {
-        let needs_split = match self {
-            MemoryInstructionType::Load { .. } => {
-                let last_is_safe = stack
-                    .last()
-                    .ok_or("Load with empty stack - program is malformed")?
-                    .is_safe;
-                if last_is_safe && skip_safe_splits {
-                    false
-                } else {
-                    true
-                }
-            }
-            MemoryInstructionType::Store { .. } => true,
-        };
-        if !needs_split {
-            return Ok(None);
-        }
-        let split_type = if scopes.is_empty() {
-            SplitType::Normal
-        } else {
-            SplitType::Block
-        };
-        Ok(Some(split_type))
-    }
-}
-
-#[derive(PartialEq, Clone)]
 pub enum LocalType {
     Get,
     Set,
@@ -160,32 +157,9 @@ impl LocalType {
     }
 }
 
-pub struct Instruction<'a> {
-    pub instr: &'a WastInstruction<'a>,
-    pub raw_text: &'a str,
-    pub index: usize,
-    pub stack: Vec<StackValue>,
-}
-
-impl<'a> Instruction<'a> {
-    pub fn new(
-        instr: &'a WastInstruction<'a>,
-        raw_text: &'a str,
-        index: usize,
-        stack: Vec<StackValue>,
-    ) -> Self {
-        let raw_text = raw_text.trim();
-        Instruction {
-            instr,
-            raw_text,
-            index,
-            stack,
-        }
-    }
-}
-
-fn type_from_load(instruction: &Instruction) -> Option<(DataType, u64)> {
-    match instruction.instr {
+// TODO - need to add all instructions (u16, u32...)
+fn type_from_load(instruction: &WastInstruction) -> Option<(DataType, u64)> {
+    match instruction {
         I32Load(arg) | I32Load16u(arg) => Some((I32, arg.offset)),
         I64Load(arg) => Some((I64, arg.offset)),
         F32Load(arg) => Some((F32, arg.offset)),
@@ -194,8 +168,8 @@ fn type_from_load(instruction: &Instruction) -> Option<(DataType, u64)> {
     }
 }
 
-fn type_from_store(instruction: &Instruction) -> Option<(DataType, u64)> {
-    match instruction.instr {
+fn type_from_store(instruction: &WastInstruction) -> Option<(DataType, u64)> {
+    match instruction {
         I32Store(arg) | I32Store8(arg) => Some((I32, arg.offset)),
         I64Store(arg) | I64Store8(arg) => Some((I64, arg.offset)),
         F32Store(arg) => Some((F32, arg.offset)),
@@ -204,8 +178,8 @@ fn type_from_store(instruction: &Instruction) -> Option<(DataType, u64)> {
     }
 }
 
-fn is_other_memory_instruction(instruction: &Instruction) -> bool {
-    match instruction.instr {
+fn is_other_memory_instruction(instruction: &WastInstruction) -> bool {
+    match instruction {
         GlobalGet(_) | GlobalSet(_) | TableGet(_) | TableSet(_) | MemorySize(_) | MemoryGrow(_)
         | MemoryInit(_) | MemoryCopy(_) | MemoryFill(_) | MemoryDiscard(_) | DataDrop(_)
         | ElemDrop(_) | TableInit(_) | TableCopy(_) | TableFill(_) | TableSize(_)

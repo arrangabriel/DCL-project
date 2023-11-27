@@ -2,9 +2,9 @@ use std::io::Write;
 
 use wast::parser::{parse, ParseBuffer};
 
-use crate::split::emit_transformed_wat;
+use crate::chop_up::emit_transformed_wat;
 
-mod split;
+mod chop_up;
 
 pub fn transform_wat_string(
     wast_string: &str,
@@ -17,7 +17,7 @@ pub fn transform_wat_string(
     let wat = parse(&buffer).map_err(|err| err.message())?;
     emit_transformed_wat(
         &wat,
-        &wast_string.split("\n").collect::<Vec<&str>>(),
+        &wast_string.split('\n').collect::<Vec<&str>>(),
         writer,
         skip_safe_splits,
         state_size,

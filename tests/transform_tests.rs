@@ -1,6 +1,6 @@
 use pretty_assertions::assert_eq;
 
-use wasm_manipulation::transform_wat_string;
+use chop_up::transform_wat_string;
 
 #[test]
 fn load() {

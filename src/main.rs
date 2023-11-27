@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::exit;
 use std::{env, io};
 
-use wasm_manipulation::transform_wat_string;
+use chop_up::transform_wat_string;
 
 fn main() {
     let config = parse_config(env::args().collect()).unwrap_or_else(|| {
@@ -30,6 +30,7 @@ fn main() {
     transform_wat_string(
         wat_string.as_str(),
         &mut io::stdout(),
+        // TODO - get this from a program argument
         6,
         config.skip_safe,
         true,
@@ -49,7 +50,7 @@ fn parse_config(mut args: Vec<String>) -> Option<Config> {
     args.remove(0);
     let file_path = args
         .iter()
-        .position(|arg| !arg.starts_with("-"))
+        .position(|arg| !arg.starts_with('-'))
         .map(|pos| args.remove(pos))?;
 
     let skip_safe = check_flag(&mut args, "--skip-safe");
