@@ -68,7 +68,8 @@ pub fn handle_pre_split<'a>(
                 1,
             )
         }
-        MemoryInstructionType::Store { ty, offset } => {
+        MemoryInstructionType::Store { ty, offset, subtype: _} => {
+            // TODO - do we need to take special care if subtype is not None?
             let ty = ty.as_str();
             let stack_juggler_local_name = format!("{ty}_{STACK_JUGGLER_NAME}");
             let set_value = format!("local.set ${stack_juggler_local_name}");
@@ -206,16 +207,19 @@ pub fn handle_deferred_split<'a>(
         );
     }
     let post_split: Vec<(String, Option<String>)> = match deferred_split.culprit_type {
-        MemoryInstructionType::Load { ty, .. } => {
-            let load_data_type = format!("{}.load", ty.as_str());
+        // TODO - this needs to emit the correct load type (e.g. i32.load16_u ...)
+        MemoryInstructionType::Load { ty, subtype, .. } => {
+            let subtype_str = subtype.map(|ty| ty.as_str()).unwrap_or("");
+            let load_data_type = format!("{}.load{subtype_str}", ty.as_str());
             vec![
                 ("local.get $utx".into(), Some("Restore load address".into())),
                 ("i32.load".into(), None),
                 (load_data_type, None),
             ]
         }
-        MemoryInstructionType::Store { ty, .. } => {
-            let store_data_type = format!("{}.store", ty.as_str());
+        MemoryInstructionType::Store { ty, subtype, .. } => {
+            let subtype_str = subtype.map(|ty| ty.as_str()).unwrap_or("");
+            let store_data_type = format!("{}.store{subtype_str}", ty.as_str());
             let load_data_type = format!(
                 "{ty}.load offset={state_base}",
                 ty = ty.as_str(),

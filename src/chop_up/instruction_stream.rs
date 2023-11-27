@@ -8,7 +8,7 @@ use wast::core::Instruction::{
     LocalSet, LocalTee, Return
 };
 use wast::token::Index;
-use WastInstruction::I32Store16;
+use WastInstruction::{I32Store16, I64Store};
 
 use crate::chop_up::constants::UTX_LOCALS;
 use crate::chop_up::instruction::DataType;
@@ -121,7 +121,7 @@ impl StackEffect {
             I32LtS | I64LtU | I64LtS | I64Eq | I32Ne | I64Ne |
             I32Shl | I32Xor => Self::new(2, Some(DataType::I32), false, false),
             I64Mul | I64Add | I64Xor | I64Sub => Self::new(2, Some(DataType::I64), false, false),
-            I32Store(_) | I32Store8(_) | I32Store16(_) => Self::new(2, None, false, false),
+            I32Store(_) | I32Store8(_) | I32Store16(_) | I64Store(_) => Self::new(2, None, false, false),
             Drop | BrIf(_) | LocalSet(_) => Self::new(1, None, false, false),
             F64Const(_) => Self::new(0, Some(DataType::F64), false, false),
             F32Const(_) => Self::new(0, Some(DataType::F32), false, false),

@@ -68,6 +68,8 @@ void *__enter(uint32_t user, uint32_t to, uint32_t amount)
 	__state.txlen = sizeof (struct tx);
 	__tx.to = to;
 	__tx.amount = amount;
+    struct utx init = {0};
+    __utx = init;
 
 	return enter;
 }

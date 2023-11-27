@@ -54,7 +54,7 @@ impl<'a> Function<'a> {
                 &lines[instruction_base_line_index
                     ..instruction_base_line_index + wast_instructions.len()],
             ) {
-            instructions_with_raw_text.push((instruction, raw_string))
+            instructions_with_raw_text.push((instruction, raw_string.trim()))
         }
 
         if name.starts_with(IGNORE_FUNC_PREFIX) {

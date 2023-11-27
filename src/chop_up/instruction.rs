@@ -21,10 +21,10 @@ pub enum InstructionType {
 
 impl From<&WastInstruction<'_>> for InstructionType {
     fn from(value: &WastInstruction<'_>) -> Self {
-        if let Some((ty, offset)) = type_from_load(value) {
-            Memory(MemoryInstructionType::Load { ty, offset })
-        } else if let Some((ty, offset)) = type_from_store(value) {
-            Memory(MemoryInstructionType::Store { ty, offset })
+        if let Some((ty, offset, subtype)) = type_from_load(value) {
+            Memory(MemoryInstructionType::Load { ty, offset, subtype})
+        } else if let Some((ty, offset, subtype)) = type_from_store(value) {
+            Memory(MemoryInstructionType::Store { ty, offset, subtype })
         } else if is_other_memory_instruction(value) {
             panic!(
                 "Unsupported instruction read when producing InstructionType - {:?}",
@@ -74,8 +74,23 @@ pub enum BlockInstructionType {
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum MemoryInstructionType {
-    Load { ty: DataType, offset: u64 },
-    Store { ty: DataType, offset: u64 },
+    Load { ty: DataType, offset: u64, subtype: Option<MemoryInstructionSubtype>},
+    Store { ty: DataType, offset: u64, subtype: Option<MemoryInstructionSubtype> },
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum MemoryInstructionSubtype {
+    SixteenU,
+    Eight
+}
+
+impl MemoryInstructionSubtype {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MemoryInstructionSubtype::SixteenU => "16_u",
+            MemoryInstructionSubtype::Eight => "8",
+        }
+    }
 }
 
 impl MemoryInstructionType {
@@ -90,15 +105,11 @@ impl MemoryInstructionType {
                     .last()
                     .ok_or("Load with empty stack - program is malformed")?
                     .is_safe;
-                if last_is_safe && skip_safe_splits {
-                    false
-                } else {
-                    true
-                }
+                !(last_is_safe && skip_safe_splits)
             }
             MemoryInstructionType::Store { .. } => true,
         };
-        return Ok(needs_split);
+        Ok(needs_split)
     }
 }
 
@@ -158,32 +169,32 @@ impl LocalType {
 }
 
 // TODO - need to add all instructions (u16, u32...)
-fn type_from_load(instruction: &WastInstruction) -> Option<(DataType, u64)> {
+fn type_from_load(instruction: &WastInstruction) -> Option<(DataType, u64, Option<MemoryInstructionSubtype>)> {
     match instruction {
-        I32Load(arg) | I32Load16u(arg) => Some((I32, arg.offset)),
-        I64Load(arg) => Some((I64, arg.offset)),
-        F32Load(arg) => Some((F32, arg.offset)),
-        F64Load(arg) => Some((F64, arg.offset)),
+        I32Load16u(arg) => Some((I32, arg.offset, Some(MemoryInstructionSubtype::SixteenU))),
+        I32Load(arg) => Some((I32, arg.offset, None)),
+        I64Load(arg) => Some((I64, arg.offset, None)),
+        F32Load(arg) => Some((F32, arg.offset, None)),
+        F64Load(arg) => Some((F64, arg.offset, None)),
         _ => None,
     }
 }
 
-fn type_from_store(instruction: &WastInstruction) -> Option<(DataType, u64)> {
+fn type_from_store(instruction: &WastInstruction) -> Option<(DataType, u64, Option<MemoryInstructionSubtype>)> {
     match instruction {
-        I32Store(arg) | I32Store8(arg) => Some((I32, arg.offset)),
-        I64Store(arg) | I64Store8(arg) => Some((I64, arg.offset)),
-        F32Store(arg) => Some((F32, arg.offset)),
-        F64Store(arg) => Some((F64, arg.offset)),
+        I32Store8(arg) => Some((I32, arg.offset, Some(MemoryInstructionSubtype::Eight))),
+        I64Store8(arg) => Some((I32, arg.offset, Some(MemoryInstructionSubtype::Eight))),
+        I32Store(arg) => Some((I32, arg.offset, None)),
+        I64Store(arg) => Some((I64, arg.offset, None)),
+        F32Store(arg) => Some((F32, arg.offset, None)),
+        F64Store(arg) => Some((F64, arg.offset, None)),
         _ => None,
     }
 }
 
 fn is_other_memory_instruction(instruction: &WastInstruction) -> bool {
-    match instruction {
-        GlobalGet(_) | GlobalSet(_) | TableGet(_) | TableSet(_) | MemorySize(_) | MemoryGrow(_)
+    matches!(instruction, GlobalGet(_) | GlobalSet(_) | TableGet(_) | TableSet(_) | MemorySize(_) | MemoryGrow(_)
         | MemoryInit(_) | MemoryCopy(_) | MemoryFill(_) | MemoryDiscard(_) | DataDrop(_)
         | ElemDrop(_) | TableInit(_) | TableCopy(_) | TableFill(_) | TableSize(_)
-        | TableGrow(_) => true,
-        _ => false,
-    }
+        | TableGrow(_))
 }

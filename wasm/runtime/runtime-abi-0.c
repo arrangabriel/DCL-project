@@ -56,7 +56,7 @@ static void print_state(void)
 {
     printf("user = %u\n", __get_user());
     printf("transform storage = \n");
-    for  (int i = 0; i < 512; i++)
+    for  (int i = 0; i < 128; i++)
     {
         printf("%hhx", __get_transform_storage(i));
         if ((i + 1) % 4 == 0) printf(" ");
@@ -80,6 +80,7 @@ int main(void)
 
 	callsite = enter(&tx, &state);
 	while (callsite != NULL) {
+	    printf("addr = %p\n", callsite);
 		print_utx();
 		callsite = step(callsite);
 	}
@@ -95,7 +96,9 @@ int main(void)
 
 	callsite = enter(&tx, &state);
 	while (callsite != NULL) {
+	    printf("addr = %p\n", callsite);
 		print_utx();
+		print_state();
 		callsite = step(callsite);
 	}
 
