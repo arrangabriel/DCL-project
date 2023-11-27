@@ -1,5 +1,4 @@
-
-
+use std::cmp::Ordering;
 use wast::core::{Func, FuncKind};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
@@ -21,8 +20,12 @@ impl<'a> Function<'a> {
     pub fn new(func: &'a Func, lines: &'a [&str]) -> Result<Self, &'static str> {
         let name = match func.id.map(|id| id.name()) {
             None => gen_random_func_name(),
-            Some(func_name) => func_name.into(),
+            Some(func_name) => {
+                func_name.into()
+            },
         };
+
+
         let (wast_instructions, local_types) =
             if let FuncKind::Inline { expression, locals } = &func.kind {
                 let local_types = locals
@@ -34,8 +37,9 @@ impl<'a> Function<'a> {
                 Err("FuncKind is not inline")
             }?;
 
-        let function_line_index = get_line_index_from_offset(&lines, func.span.offset());
-        let signature_line = lines[function_line_index].trim();
+        let function_line_index = get_line_index_from_offset(lines, func.span.offset());
+        let signature = lines[function_line_index].trim();
+
         let function_member_base_line_index = function_line_index + 1;
         let instruction_base_line_index = function_member_base_line_index
             + lines[function_member_base_line_index..]
@@ -43,17 +47,44 @@ impl<'a> Function<'a> {
                 .take_while(|line| line.contains("(local"))
                 .count();
 
-        let mut instructions_with_stack = Vec::default();
+        let mut instructions_with_raw_text = Vec::default();
+        for (instruction, &raw_string) in wast_instructions
+            .iter()
+            .zip(
+                &lines[instruction_base_line_index
+                    ..instruction_base_line_index + wast_instructions.len()],
+            ) {
+            instructions_with_raw_text.push((instruction, raw_string))
+        }
+
+        if name.starts_with(IGNORE_FUNC_PREFIX) {
+            return Ok(Self {
+                name,
+                signature,
+                local_types,
+                instructions: instructions_with_raw_text.into_iter().enumerate().map(|(i, (instr, raw_text))| {
+                    Instruction {
+                        instr,
+                        raw_text,
+                        scopes: Vec::default(),
+                        stack: Vec::default(),
+                        index: instruction_base_line_index + i
+                    }
+                }).collect()
+            })
+        }
+
+        let mut instructions_with_text_and_stack = Vec::default();
         let mut current_stack_state = Vec::default();
-        for instruction in wast_instructions {
-            instructions_with_stack.push((instruction, current_stack_state.to_vec()));
+        for (instruction, raw_string) in instructions_with_raw_text {
+            instructions_with_text_and_stack.push((instruction, raw_string, current_stack_state.to_vec()));
             StackEffect::from_wast_instruction(instruction, &local_types)
                 .update_stack(&mut current_stack_state)?;
         }
 
         let mut instructions_with_stack_and_scope = Vec::default();
         let mut current_scopes = Vec::default();
-        for (instruction, stack) in instructions_with_stack {
+        for (instruction, text, stack) in instructions_with_text_and_stack {
             if let InstructionType::Benign(BenignInstructionType::Block(ty)) =
                 InstructionType::from(instruction)
             {
@@ -79,16 +110,12 @@ impl<'a> Function<'a> {
                     }
                 }
             }
-            instructions_with_stack_and_scope.push((instruction, stack, current_scopes.to_vec()))
+            instructions_with_stack_and_scope.push((instruction, text, stack, current_scopes.to_vec()))
         }
 
         let mut instructions = Vec::default();
-        for (i, ((instruction, stack, scopes), raw_text)) in instructions_with_stack_and_scope
+        for (i, (instruction, raw_text, stack, scopes)) in instructions_with_stack_and_scope
             .into_iter()
-            .zip(
-                &lines[instruction_base_line_index
-                    ..instruction_base_line_index + wast_instructions.len()],
-            )
             .enumerate()
         {
             instructions.push(Instruction::new(
@@ -103,7 +130,7 @@ impl<'a> Function<'a> {
         Ok(Function {
             name,
             local_types,
-            signature: signature_line,
+            signature,
             instructions,
         })
     }
@@ -124,10 +151,11 @@ pub fn index_of_scope_end(instructions: &[Instruction]) -> Result<usize, &'stati
                 BlockInstructionType::End => -1,
                 BlockInstructionType::Block(_) => 1,
             };
-            if scope_level == 0 {
-                return Ok(i);
-            } else if scope_level < 0 {
-                return Err("Unbalanced scope delimiters");
+
+            match scope_level.cmp(&0) {
+                Ordering::Equal => return Ok(i),
+                Ordering::Less => return Err("Unbalanced scope delimiters"),
+                Ordering::Greater => {}
             }
         }
     }

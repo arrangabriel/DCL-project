@@ -83,12 +83,16 @@ impl<'a> WatEmitter<'a> {
                 });
                 break;
             }
-            let effect = StackEffect::from_instruction(instruction, locals);
-            for _ in 0..effect.remove_n {
-                stack.pop();
-            }
-            if let Some(stack_value) = effect.add {
-                stack.push(stack_value.ty);
+            match StackEffect::from_instruction(instruction, locals) {
+                StackEffect::Normal { remove_n, add, .. } => {
+                    for _ in 0..remove_n {
+                        stack.pop();
+                    }
+                    if let Some(stack_value) = add {
+                        stack.push(stack_value.ty);
+                    }
+                }
+                StackEffect::Return => stack.clear(),
             }
         }
     }

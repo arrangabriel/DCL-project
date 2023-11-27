@@ -81,27 +81,26 @@ int main(void)
 	callsite = enter(&tx, &state);
 	while (callsite != NULL) {
 		print_utx();
-		print_state();
 		callsite = step(callsite);
 	}
 
     print_balance(1);
 
-//	printf("\nTransaction 2:\n");
-//
-//	state.user = 1;
-//	state.txlen = sizeof (struct tx);
-//	tx.to = 2;
-//	tx.amount = 300;
-//
-//	callsite = enter(&tx, &state);
-//	while (callsite != NULL) {
-//		print_utx();
-//		callsite = step(callsite);
-//	}
-//
-//    print_balance(1);
-//    print_balance(2);
+	printf("\nTransaction 2:\n");
+
+	state.user = 1;
+	state.txlen = sizeof (struct tx);
+	tx.to = 2;
+	tx.amount = 300;
+
+	callsite = enter(&tx, &state);
+	while (callsite != NULL) {
+		print_utx();
+		callsite = step(callsite);
+	}
+
+    print_balance(1);
+    print_balance(2);
 
 	return 0;
 }

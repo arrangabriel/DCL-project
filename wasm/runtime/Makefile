@@ -19,7 +19,7 @@ check-%-native: system-%.elf
 check-%-wasm: payment-%.wasm runtime-%.wasm
 	wasmtime run --preload contract=$^
 
-check-%: payment-%.wasm runtime-abi-0.wasm
+check-%: payment-%.wat runtime-abi-0.wat
 	wasmtime run --preload contract=$^
 
 system-%.elf: payment-%.c runtime-%.c

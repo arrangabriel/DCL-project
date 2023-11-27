@@ -8,7 +8,7 @@ use chop_up::transform_wat_string;
 
 fn main() {
     let config = parse_config(env::args().collect()).unwrap_or_else(|| {
-        println!("Usage: [wasm-manipulator] file-path");
+        eprintln!("Usage: [chop-up] file-path");
         exit(1)
     });
 
@@ -16,14 +16,14 @@ fn main() {
     let mut wat_string = String::new();
 
     if !file_path.is_file() {
-        println!("No such file: {:?}", config.file_path.as_str());
+        eprintln!("No such file: {:?}", config.file_path.as_str());
         exit(1);
     }
 
     File::open(file_path)
         .and_then(|mut file| file.read_to_string(&mut wat_string))
         .unwrap_or_else(|err| {
-            println!("Failed to read file: {:?}", err);
+            eprintln!("Failed to read file: {:?}", err);
             exit(1);
         });
 
@@ -36,7 +36,7 @@ fn main() {
         true,
     )
     .unwrap_or_else(|err| {
-        println!("Failed to parse: {:?}", err);
+        eprintln!("Failed to parse: {:?}", err);
         exit(1);
     });
 }

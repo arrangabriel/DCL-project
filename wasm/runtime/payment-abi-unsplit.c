@@ -5,6 +5,18 @@
 
 static uint64_t balances[NUSER];
 
+static void *mint(struct tx *tx, struct utx *utx, struct state *state)
+{
+	uint32_t *to = (uint32_t*) &balances[tx->to];
+
+	if ((*to + tx->amount) < *to)
+		return NULL;
+
+	*to += tx->amount;
+
+	return NULL;
+}
+
 static void *pay(struct tx *tx, struct utx *utx, struct state *state)
 {
 	uint32_t *from = (uint32_t *) &balances[state->user];
@@ -38,13 +50,9 @@ void *enter(void *_tx, struct utx *utx, struct state *state)
 		return NULL;
 
 	if (state->user == MINTER)
-	{
-        balances[tx->to] += tx->amount;
-        return NULL;
-    }
+	    return mint(tx, utx, state);
 	else
-	    return NULL;
-		//return pay(tx, utx, state);
+		return pay(tx, utx, state);
 }
 
 
