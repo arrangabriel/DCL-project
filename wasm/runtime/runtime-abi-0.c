@@ -98,7 +98,6 @@ int main(void)
 	while (callsite != NULL) {
 	    printf("addr = %p\n", callsite);
 		print_utx();
-		print_state();
 		callsite = step(callsite);
 	}
 

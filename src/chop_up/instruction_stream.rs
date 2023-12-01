@@ -103,6 +103,10 @@ impl StackEffect {
         Ok(())
     }
 
+    // IMPORTANT!
+    // This is the only place where we can detect unsupported instructions.
+    // When adding a memory instruction it should also be added to the implementation of
+    // InstructionType::from<&(Wast)Instruction>.
     pub fn from_wast_instruction(instruction: &WastInstruction, local_types: &[DataType]) -> Self {
         match instruction {
             Return => Self::Return,

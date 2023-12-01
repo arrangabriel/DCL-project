@@ -20,7 +20,7 @@ struct state
 {
 	uint32_t user;
 	uint16_t txlen;
-	char transform_storage[128];
+	char transform_storage[128]; // remember this
 } __attribute__ ((packed));
 
 
