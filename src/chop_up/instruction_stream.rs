@@ -9,13 +9,14 @@ use wast::core::Instruction::{
 };
 use wast::token::Index;
 use WastInstruction::{I32Store16, I64Store};
+use std::cmp::Ordering;
 
-use crate::chop_up::constants::UTX_LOCALS;
-use crate::chop_up::instruction::DataType;
+use crate::chop_up::utils::UTX_LOCALS;
+use crate::chop_up::instruction::{BenignInstructionType, BlockInstructionType, DataType, InstructionType};
 
 pub struct Instruction<'a> {
     pub instr: &'a WastInstruction<'a>,
-    pub raw_text: &'a str,
+    pub raw_text: String,
     pub index: usize,
     pub stack: Vec<StackValue>,
     pub scopes: Vec<Scope>,
@@ -24,12 +25,11 @@ pub struct Instruction<'a> {
 impl<'a> Instruction<'a> {
     pub fn new(
         instr: &'a WastInstruction<'a>,
-        raw_text: &'a str,
+        raw_text: String,
         index: usize,
         stack: Vec<StackValue>,
         scopes: Vec<Scope>,
     ) -> Self {
-        let raw_text = raw_text.trim();
         Instruction {
             instr,
             raw_text,
@@ -141,13 +141,13 @@ impl StackEffect {
 fn type_and_safety_from_param(index: &Index, local_types: &[DataType]) -> (DataType, bool) {
     match index {
         Index::Num(index, _) => {
-            let index = *index as usize;
+            let index = *index;
             let safe = index_is_param(index);
             let mut utx_locals = Vec::default();
             utx_locals.extend_from_slice(&UTX_LOCALS);
             utx_locals.extend_from_slice(local_types);
             let ty = *utx_locals
-                .get(index)
+                .get(index as usize)
                 .expect("Indexed get to locals should use in bounds index");
             (ty, safe)
         }
@@ -162,7 +162,29 @@ fn name_is_param(name: &str) -> bool {
 }
 
 /// Assuming use in a function of the type (tx, state) -> ?
-fn index_is_param(index: usize) -> bool {
+pub fn index_is_param(index: u32) -> bool {
     index < 3
+}
+
+/// To be used at some point inside of a scope
+pub fn index_of_scope_end(instructions: &[Instruction]) -> Result<usize, &'static str> {
+    let mut scope_level = 1;
+    for (i, instruction_with_text) in instructions.iter().enumerate() {
+        if let InstructionType::Benign(BenignInstructionType::Block(block_instruction_type)) =
+            InstructionType::from(instruction_with_text)
+        {
+            scope_level += match block_instruction_type {
+                BlockInstructionType::End => -1,
+                BlockInstructionType::Block(_) => 1,
+            };
+
+            match scope_level.cmp(&0) {
+                Ordering::Equal => return Ok(i),
+                Ordering::Less => return Err("Unbalanced scope delimiters"),
+                Ordering::Greater => {}
+            }
+        }
+    }
+    Err("Unbalanced scope delimiters")
 }
 

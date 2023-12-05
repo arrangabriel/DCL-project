@@ -3,13 +3,12 @@ use std::io::Write;
 use wast::core::{Func, ModuleField, ModuleKind};
 use wast::Wat;
 
-use crate::chop_up::function;
 use crate::chop_up::function::Function;
+use crate::chop_up::utils::{count_parens, get_line_from_offset, MODULE_MEMBER_INDENT};
 use crate::chop_up::instruction::{
     BenignInstructionType, BlockInstructionType, DataType, InstructionType,
 };
 use crate::chop_up::split::{DeferredSplit, handle_deferred_split, setup_split};
-use crate::chop_up::constants::MODULE_MEMBER_INDENT;
 use crate::chop_up::emit::WatEmitter;
 use crate::chop_up::instruction_stream::Instruction;
 
@@ -33,13 +32,13 @@ pub fn emit_transformed_wat(
     transformer.emit_module();
 
     let mut functions = Vec::default();
-    let mut saved_offsets = Vec::default();
+    let mut module_members = Vec::default();
     for field in module_fields {
         match field {
             ModuleField::Func(func) => functions.push(extract_function(func, lines)?),
-            ModuleField::Export(export) => saved_offsets.push(export.span.offset()),
-            ModuleField::Type(ty) => saved_offsets.push(ty.span.offset()),
-            ModuleField::Global(global) => saved_offsets.push(global.span.offset()),
+            ModuleField::Export(export) => module_members.push(export.span.offset()),
+            ModuleField::Type(ty) => module_members.push(ty.span.offset()),
+            ModuleField::Global(global) => module_members.push(global.span.offset()),
             _ => { /* Other module fields might need to be handled at a later date */ }
         }
     }
@@ -57,15 +56,11 @@ pub fn emit_transformed_wat(
             .collect();
     }
 
-    for saved_offset in saved_offsets {
-        let line = function::get_line_from_offset(lines, saved_offset);
-        let extra_parens = line.chars().fold(0, |v, c| {
-            v + match c {
-                '(' => -1,
-                ')' => 1,
-                _ => 0,
-            }
-        }) as usize;
+    for module_member_offset in module_members {
+        let line = get_line_from_offset(lines, module_member_offset);
+        // We can safely convert to usize, as the result should always be positive
+        // this assumes module members are single-line!!
+        let extra_parens = count_parens(line) as usize;
         transformer.writeln(
             line[..line.len() - extra_parens].trim(),
             MODULE_MEMBER_INDENT,
@@ -144,7 +139,7 @@ pub fn handle_instructions<'a>(
             InstructionType::Benign(ty) => {
                 match ty {
                     BenignInstructionType::Block(ty) => match ty {
-                        BlockInstructionType::Block(_) => {
+                        BlockInstructionType::Block(id) => {
                             // Handle the special case of blocks being emitted on the previous indent
                             transformer.current_scope_level -= 1;
                             let prev_stack_start = instruction
@@ -160,29 +155,31 @@ pub fn handle_instructions<'a>(
                                 true,
                                 locals,
                             );
+                            let block_instruction = if let Some(id) = id {
+                                format!("(block ${id}")
+                            } else {
+                                "(block".into()
+                            };
+                            transformer.emit_instruction(&block_instruction, None);
+                            continue;
                         }
-                        BlockInstructionType::End => {}
+                        BlockInstructionType::End => {
+                            transformer.emit_instruction(")", None);
+                            continue;
+                        },
                     },
-                    BenignInstructionType::IndexedLocal(ty, index) => {
-                        // After changing function signatures:
-                        // tx, state -> tx, utx, state
-                        // all locals after the first have to be incremented by one
-                        let instruction_str =
-                            format!("local.{ty_str} {index}", ty_str = ty.as_str());
-                        transformer.emit_instruction(&instruction_str, None);
-                        continue;
-                    }
                     BenignInstructionType::Return => {
                         if instruction.stack.is_empty() {
                             transformer.emit_instruction("i32.const 0", Some("Return NULL".into()));
                         }
                     }
-                    BenignInstructionType::Other => {}
+                    _ => {}
                 }
             }
         }
-        transformer.emit_instruction(instruction.raw_text, None);
+        transformer.emit_instruction(&instruction.raw_text, None);
     }
     transformer.emit_end_func();
     Ok(deferred_splits)
 }
+

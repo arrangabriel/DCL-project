@@ -6,7 +6,7 @@ use crate::chop_up::function::Function;
 use crate::chop_up::instruction::{
     DataType, InstructionType, MemoryInstructionType,
 };
-use crate::chop_up::constants::*;
+use crate::chop_up::utils::*;
 use crate::chop_up::instruction_stream::{Instruction, StackEffect, StackValue};
 
 pub struct WatEmitter<'a> {
@@ -304,7 +304,7 @@ impl<'a> WatEmitter<'a> {
         if !&func.instructions.is_empty() {
             self.emit_existing_locals(&func.local_types);
             for instruction in &func.instructions {
-                self.emit_instruction(instruction.raw_text, None);
+                self.emit_instruction(&instruction.raw_text, None);
             }
             self.emit_end_func();
         }

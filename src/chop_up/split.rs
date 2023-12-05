@@ -1,10 +1,10 @@
-use crate::chop_up::function::index_of_scope_end;
+use crate::chop_up::instruction_stream::index_of_scope_end;
 use crate::chop_up::instruction::{DataType, MemoryInstructionType};
 use crate::chop_up::transform::{handle_instructions, setup_func};
 use crate::chop_up::emit::WatEmitter;
 use crate::chop_up::instruction_stream::{Instruction, Scope, ScopeType, StackValue};
 #[allow(unused_imports)] // This is due to a bug in my linter...
-use crate::chop_up::constants::{ADDRESS_LOCAL_NAME, STACK_JUGGLER_NAME};
+use crate::chop_up::utils::{ADDRESS_LOCAL_NAME, STACK_JUGGLER_NAME};
 
 pub fn setup_split<'a>(
     base_name: &str,

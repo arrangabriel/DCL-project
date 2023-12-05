@@ -1,12 +1,15 @@
-use std::cmp::Ordering;
-use wast::core::{Func, FuncKind};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
+use wast::core::{Func, FuncKind};
+use wast::core::Instruction as WastInstruction;
+use wast::token::Index;
 
 use crate::chop_up::instruction::{
     BenignInstructionType, BlockInstructionType, DataType, InstructionType,
 };
-use crate::chop_up::instruction_stream::{Instruction, Scope, ScopeType, StackEffect};
+use crate::chop_up::instruction_stream::{index_is_param, Instruction, Scope, ScopeType, StackEffect};
+use crate::chop_up::utils;
+use crate::chop_up::utils::{count_parens, UTX_LOCALS};
 
 pub struct Function<'a> {
     pub name: String,
@@ -19,44 +22,85 @@ impl<'a> Function<'a> {
     // TODO - this function is doing way to much work
     pub fn new(func: &'a Func, lines: &'a [&str]) -> Result<Self, &'static str> {
         let name = match func.id.map(|id| id.name()) {
+            Some(func_name) => func_name.into(),
             None => gen_random_func_name(),
-            Some(func_name) => {
-                func_name.into()
-            },
         };
 
-
-        let (wast_instructions, local_types) =
+        let (wast_instructions, mut local_types) =
             if let FuncKind::Inline { expression, locals } = &func.kind {
                 let local_types = locals
                     .iter()
                     .map(|local| local.ty.into())
                     .collect::<Vec<DataType>>();
-                Ok((expression.instrs.iter().as_slice(), local_types))
-            } else {
-                Err("FuncKind is not inline")
-            }?;
+                (expression.instrs.iter().as_slice(), local_types)
+            } else { return Err("FuncKind is not inline"); };
 
-        let function_line_index = get_line_index_from_offset(lines, func.span.offset());
+        let function_line_index = utils::get_line_index_from_offset(lines, func.span.offset());
         let signature = lines[function_line_index].trim();
 
         let function_member_base_line_index = function_line_index + 1;
         let instruction_base_line_index = function_member_base_line_index
             + lines[function_member_base_line_index..]
-                .iter()
-                .take_while(|line| line.contains("(local"))
-                .count();
+            .iter()
+            .take_while(|line| line.contains("(local"))
+            .count();
 
-        let mut instructions_with_raw_text = Vec::default();
+        let mut instructions_with_raw_text = Vec::new();
+        let mut remapped_locals: Vec<(u32, u32)> = Vec::new();
         for (instruction, &raw_string) in wast_instructions
             .iter()
             .zip(
                 &lines[instruction_base_line_index
                     ..instruction_base_line_index + wast_instructions.len()],
             ) {
-            instructions_with_raw_text.push((instruction, raw_string.trim()))
+            let mut instruction_string = raw_string.trim().to_string();
+            let mut paren_imbalance = count_parens(raw_string);
+            if matches!(instruction, WastInstruction::End(_)) {
+                paren_imbalance -= 1;
+            }
+            if paren_imbalance > 0 {
+                let actual_len = instruction_string.len() - paren_imbalance as usize;
+                instruction_string = instruction_string[..actual_len].trim().to_string();
+            }
+            // Here there is a possibly scary assumption made.
+            // That the compiler will not use named arguments to local-instructions
+            // To fix we must also handle the [Index::Id] case
+            match instruction {
+                WastInstruction::LocalSet(Index::Num(i, _)) | WastInstruction::LocalTee(Index::Num(i, _)) => {
+                    if index_is_param(*i) {
+                        let new_name = if let Some((_, new_name)) = remapped_locals.iter().find(|(param, _)| param.eq(i)) {
+                            *new_name
+                        } else {
+                            let new_name = (UTX_LOCALS.len() + local_types.len() + remapped_locals.len()) as u32;
+                            remapped_locals.push((*i, new_name));
+                            new_name
+                        };
+                        instruction_string = format!(
+                            "{base_instruction} {new_name}",
+                            base_instruction = &instruction_string[..instruction_string.len() - 2]
+                        );
+                    }
+                }
+                WastInstruction::LocalGet(Index::Num(i, _)) => {
+                    if index_is_param(*i) {
+                        if let Some(new_name) = remapped_locals.iter().find(|(param, _)| param.eq(i)).map(|(_, new_name)| *new_name) {
+                            instruction_string = format!(
+                                "{base_instruction} {new_name}",
+                                base_instruction = &instruction_string[..instruction_string.len() - 2]
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+            instructions_with_raw_text.push((instruction, instruction_string))
         }
 
+        for _ in remapped_locals {
+            local_types.push(DataType::I32)
+        }
+
+        // No preprocessing is needed in this case...
         if name.starts_with(IGNORE_FUNC_PREFIX) {
             return Ok(Self {
                 name,
@@ -68,10 +112,10 @@ impl<'a> Function<'a> {
                         raw_text,
                         scopes: Vec::default(),
                         stack: Vec::default(),
-                        index: instruction_base_line_index + i
+                        index: instruction_base_line_index + i,
                     }
-                }).collect()
-            })
+                }).collect(),
+            });
         }
 
         let mut instructions_with_text_and_stack = Vec::default();
@@ -138,45 +182,6 @@ impl<'a> Function<'a> {
     pub fn ignore(&self) -> bool {
         self.name.starts_with(IGNORE_FUNC_PREFIX)
     }
-}
-
-/// To be used at some point inside of a scope
-pub fn index_of_scope_end(instructions: &[Instruction]) -> Result<usize, &'static str> {
-    let mut scope_level = 1;
-    for (i, instruction_with_text) in instructions.iter().enumerate() {
-        if let InstructionType::Benign(BenignInstructionType::Block(block_instruction_type)) =
-            InstructionType::from(instruction_with_text)
-        {
-            scope_level += match block_instruction_type {
-                BlockInstructionType::End => -1,
-                BlockInstructionType::Block(_) => 1,
-            };
-
-            match scope_level.cmp(&0) {
-                Ordering::Equal => return Ok(i),
-                Ordering::Less => return Err("Unbalanced scope delimiters"),
-                Ordering::Greater => {}
-            }
-        }
-    }
-    Err("Unbalanced scope delimiters")
-}
-
-fn get_line_index_from_offset<'a>(lines: &'a [&'a str], offset: usize) -> usize {
-    let total_len = lines.iter().map(|l| l.len() + 1).sum();
-    assert!(offset < total_len, "Offset provided was out of bounds");
-    let mut line_end = 0;
-    for (i, line) in lines.iter().enumerate() {
-        line_end += line.len() + 1;
-        if offset < line_end {
-            return i;
-        }
-    }
-    unreachable!()
-}
-
-pub fn get_line_from_offset<'a>(lines: &'a [&'a str], offset: usize) -> &'a str {
-    lines[get_line_index_from_offset(lines, offset)]
 }
 
 fn gen_random_func_name() -> String {

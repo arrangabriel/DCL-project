@@ -3,6 +3,6 @@ mod function;
 mod instruction;
 mod split;
 mod transform;
-mod constants;
+mod utils;
 mod emit;
 mod instruction_stream;

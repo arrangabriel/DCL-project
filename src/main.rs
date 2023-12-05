@@ -1,69 +1,80 @@
+use std::{env, io};
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use std::process::exit;
-use std::{env, io};
 
 use chop_up::transform_wat_string;
 
-fn main() {
-    let config = parse_config(env::args().collect()).unwrap_or_else(|| {
-        eprintln!("Usage: [chop-up] file-path");
-        exit(1)
-    });
+fn main() -> Result<(), String> {
+    let args: Vec<String> = env::args().collect();
+    let program_name = args.get(0)
+        .and_then(|name| name.split('/').last())
+        .expect("Program name should always be an argument");
 
-    let file_path = Path::new(config.file_path.as_str());
+    let config = parse_config(&args[1..]).map_err(|err| {
+        eprintln!("\
+Usage {program_name} [input_file] [state_size] [opts...]
+Possible opts are:
+  --skip-safe        optimize splits by skipping accesses to function arguments
+  --explain-splits   add explanatory comments to transformed code
+        ");
+        err
+    })?;
+
+    let file_path = Path::new(config.file_path);
     let mut wat_string = String::new();
 
     if !file_path.is_file() {
-        eprintln!("No such file: {:?}", config.file_path.as_str());
-        exit(1);
+        return Err(format!("No such file: {}", config.file_path));
     }
 
-    File::open(file_path)
-        .and_then(|mut file| file.read_to_string(&mut wat_string))
-        .unwrap_or_else(|err| {
-            eprintln!("Failed to read file: {:?}", err);
-            exit(1);
-        });
+    File::open(file_path).and_then(|mut file| file.read_to_string(&mut wat_string))
+        .map_err(|err| format!("Failed to read file: {err:?}"))?;
 
     transform_wat_string(
         wat_string.as_str(),
         &mut io::stdout(),
-        // TODO - get this from a program argument
-        6,
+        config.state_size,
         config.skip_safe,
-        true,
-    )
-    .unwrap_or_else(|err| {
-        eprintln!("Failed to parse: {:?}", err);
-        exit(1);
-    });
+        config.explain_splits,
+    ).map_err(|err| format!("Failed to parse file: {err}"))
 }
 
-struct Config {
-    file_path: String,
+struct Config<'a> {
+    file_path: &'a str,
+    state_size: usize,
     skip_safe: bool,
+    explain_splits: bool,
 }
 
-fn parse_config(mut args: Vec<String>) -> Option<Config> {
-    args.remove(0);
-    let file_path = args
-        .iter()
-        .position(|arg| !arg.starts_with('-'))
-        .map(|pos| args.remove(pos))?;
-
-    let skip_safe = check_flag(&mut args, "--skip-safe");
-
-    Some(Config {
-        file_path,
-        skip_safe,
-    })
+impl<'a> Config<'a> {
+    fn default(file_path: &'a str, state_size: usize) -> Self {
+        Self {
+            file_path,
+            state_size,
+            skip_safe: false,
+            explain_splits: false,
+        }
+    }
 }
 
-fn check_flag(args: &mut Vec<String>, flag: &str) -> bool {
-    args.iter()
-        .position(|arg| arg.as_str().eq(flag))
-        .map(|pos| args.swap_remove(pos))
-        .is_some()
+fn parse_config(args: &[String]) -> Result<Config, String> {
+    let file_path = args.get(0).ok_or("Missing file path")?;
+    let state_size = args.get(1)
+        .ok_or("Missing state size")?
+        .parse()
+        .map_err(|_| "State size must be a positive integer")?;
+    let mut config = Config::default(file_path, state_size);
+
+    for flag in args[2..].iter() {
+        match flag.as_str() {
+            "--skip-safe" => config.skip_safe = true,
+            "--explain-splits" => config.explain_splits = true,
+            _ => {
+                return Err(format!("Unknown flag {flag}"));
+            }
+        }
+    }
+
+    Ok(config)
 }

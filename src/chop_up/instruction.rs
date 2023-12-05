@@ -1,14 +1,11 @@
 use crate::chop_up::instruction_stream::StackValue;
 use crate::chop_up::instruction::DataType::*;
 use crate::chop_up::instruction::InstructionType::{Benign, Memory};
-use crate::chop_up::instruction::LocalType::{Get, Set, Tee};
 use crate::chop_up::instruction_stream::Instruction;
-use wast::core::Instruction::LocalSet;
 use wast::core::{Instruction as WastInstruction, ValType};
-use wast::token::Index;
 use WastInstruction::{
     Block, DataDrop, ElemDrop, End, F32Load, F32Store, F64Load, F64Store, GlobalGet, GlobalSet,
-    I32Load, I32Load16u, I32Store, I32Store8, I64Load, I64Store, I64Store8, LocalGet, LocalTee,
+    I32Load, I32Load16u, I32Store, I32Store8, I64Load, I64Store, I64Store8,
     MemoryCopy, MemoryDiscard, MemoryFill, MemoryGrow, MemoryInit, MemorySize, Return, TableCopy,
     TableFill, TableGet, TableGrow, TableInit, TableSet, TableSize,
 };
@@ -36,15 +33,6 @@ impl From<&WastInstruction<'_>> for InstructionType {
                     id.label.map(|id| id.name().into()),
                 )),
                 End(_) => BenignInstructionType::Block(BlockInstructionType::End),
-                LocalGet(Index::Num(index, _)) => {
-                    BenignInstructionType::IndexedLocal(Get, *index as usize)
-                }
-                LocalSet(Index::Num(index, _)) => {
-                    BenignInstructionType::IndexedLocal(Set, *index as usize)
-                }
-                LocalTee(Index::Num(index, _)) => {
-                    BenignInstructionType::IndexedLocal(Tee, *index as usize)
-                }
                 Return => BenignInstructionType::Return,
                 _ => BenignInstructionType::Other,
             })
@@ -61,7 +49,6 @@ impl From<&Instruction<'_>> for InstructionType {
 #[derive(PartialEq, Clone)]
 pub enum BenignInstructionType {
     Block(BlockInstructionType),
-    IndexedLocal(LocalType, usize),
     Return,
     Other,
 }
@@ -147,23 +134,6 @@ impl From<ValType<'_>> for DataType {
             ValType::F32 => F32,
             ValType::F64 => F64,
             _ => panic!("Unsupported type {:?}", value),
-        }
-    }
-}
-
-#[derive(PartialEq, Clone)]
-pub enum LocalType {
-    Get,
-    Set,
-    Tee,
-}
-
-impl LocalType {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Get => "get",
-            Set => "set",
-            Tee => "tee",
         }
     }
 }

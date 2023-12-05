@@ -1,10 +1,7 @@
-use pretty_assertions::assert_eq;
-
-use chop_up::transform_wat_string;
-
+mod utils;
 #[test]
 fn load() {
-    test_transform(
+    utils::test_transform(
         "\
 (module
     (func $load (param $tx i32) (param $utx i32) (param $state i32) (result i32)
@@ -56,7 +53,7 @@ fn load() {
 
 #[test]
 fn store() {
-    test_transform(
+    utils::test_transform(
         "\
 (module
     (func $store (param $tx i32) (param $utx i32) (param $state i32) (result i32)
@@ -115,7 +112,7 @@ fn store() {
 
 #[test]
 fn block() {
-    test_transform(
+    utils::test_transform(
         "\
 (module
     (func $block (param $tx i32) (param $utx i32) (param $state i32) (result i32)
@@ -252,7 +249,7 @@ fn block() {
 
 #[test]
 fn stack_and_locals() {
-    test_transform(
+    utils::test_transform(
         "\
 (module
     (func $stack_and_locals (param $tx i32) (param $utx i32) (param $state i32) (result i32)
@@ -348,7 +345,7 @@ fn stack_and_locals() {
 
 #[test]
 fn transaction() {
-    test_transform(
+    utils::test_transform(
         "\
 (module
   (type (;0;) (func (param i32 i32 i32) (result i32)))
@@ -359,38 +356,38 @@ fn transaction() {
   (func $__wasm_call_ctors (type 1))
   (func $enter (type 0) (param i32 i32 i32) (result i32)
     (local i32 i32 i32 i32)
-    (block  ;; label = @1
+    (block
       local.get 2
       i32.load align=1
       local.tee 3
       i32.const 9999
       i32.gt_u
-      br_if 0 (;@1;)
+      br_if 0
       local.get 2
       i32.load16_u offset=4 align=1
       i32.const 8
       i32.ne
-      br_if 0 (;@1;)
+      br_if 0
       local.get 0
       i32.load align=1
       local.tee 5
       local.get 3
       i32.eq
-      br_if 0 (;@1;)
+      br_if 0
       local.get 5
       i32.const 9999
       i32.gt_u
-      br_if 0 (;@1;)
+      br_if 0
       local.get 0
       i32.const 4
       i32.add
       i32.load align=1
       local.tee 6
       i32.eqz
-      br_if 0 (;@1;)
-      (block  ;; label = @2
+      br_if 0
+      (block
         local.get 3
-        br_if 0 (;@2;)
+        br_if 0
         local.get 5
         i32.const 3
         i32.shl
@@ -404,7 +401,7 @@ fn transaction() {
         local.tee 6
         local.get 5
         i32.lt_u
-        br_if 1 (;@1;)
+        br_if 1
         local.get 3
         local.get 6
         i32.store
@@ -421,7 +418,7 @@ fn transaction() {
       local.tee 4
       local.get 6
       i32.lt_u
-      br_if 0 (;@1;)
+      br_if 0
       local.get 6
       local.get 5
       i32.const 3
@@ -433,7 +430,7 @@ fn transaction() {
       i32.const -1
       i32.xor
       i32.gt_u
-      br_if 0 (;@1;)
+      br_if 0
       local.get 3
       local.get 4
       local.get 6
@@ -579,7 +576,7 @@ fn transaction() {
         local.get $state
         local.get 6
         i32.store offset=26
-        (block  ;; label = @1
+        (block
             local.get 2
             local.set $memory_address
             local.get $utx
@@ -706,7 +703,7 @@ fn transaction() {
             local.tee 3
             i32.const 9999
             i32.gt_u
-            br_if 0 (;@1;)
+            br_if 0
             local.get 2
             local.set $memory_address
             local.get $utx
@@ -759,7 +756,7 @@ fn transaction() {
             i32.load16_u
             i32.const 8
             i32.ne
-            br_if 0 (;@1;)
+            br_if 0
             local.get 0
             local.set $memory_address
             local.get $utx
@@ -813,11 +810,11 @@ fn transaction() {
             local.tee 5
             local.get 3
             i32.eq
-            br_if 0 (;@1;)
+            br_if 0
             local.get 5
             i32.const 9999
             i32.gt_u
-            br_if 0 (;@1;)
+            br_if 0
             local.get 0
             i32.const 4
             i32.add
@@ -872,7 +869,7 @@ fn transaction() {
             i32.load
             local.tee 6
             i32.eqz
-            br_if 0 (;@1;)
+            br_if 0
             local.get $state
             local.get 3
             i32.store offset=14
@@ -885,9 +882,9 @@ fn transaction() {
             local.get $state
             local.get 6
             i32.store offset=26
-            (block  ;; label = @2
+            (block
                 local.get 3
-                br_if 0 (;@2;)
+                br_if 0
                 local.get 5
                 i32.const 3
                 i32.shl
@@ -980,7 +977,7 @@ fn transaction() {
                 local.tee 6
                 local.get 5
                 i32.lt_u
-                br_if 1 (;@1;)
+                br_if 1
                 local.get 3
                 local.get 6
                 local.set $i32_local
@@ -1069,7 +1066,7 @@ fn transaction() {
             local.tee 4
             local.get 6
             i32.lt_u
-            br_if 0 (;@1;)
+            br_if 0
             local.get 6
             local.get 5
             i32.const 3
@@ -1196,7 +1193,7 @@ fn transaction() {
             i32.const -1
             i32.xor
             i32.gt_u
-            br_if 0 (;@1;)
+            br_if 0
             local.get 3
             local.get 4
             local.get 6
@@ -1415,11 +1412,4 @@ fn transaction() {
     (type $utx_f (func (param i32 i32 i32) (result i32)))
 )"
     );
-}
-
-fn test_transform(input: &str, expected_output: &str) {
-    let mut output_vec: Vec<u8> = Vec::new();
-    transform_wat_string(input, &mut output_vec, 6, false, false).unwrap();
-    let output_wat = String::from_utf8(output_vec).unwrap();
-    assert_eq!(output_wat.trim(), expected_output.trim());
 }
