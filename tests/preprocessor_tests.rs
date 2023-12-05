@@ -46,7 +46,7 @@ fn joined_lines() {
     (elem (i32.const 1) func $f_1 $f_2 $f_3)
     (memory 10)
     (type $utx_f (func (param i32 i32 i32) (result i32)))
-)"
+)",
     );
 }
 

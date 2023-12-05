@@ -3,11 +3,9 @@ use std::io::Write;
 use itertools::Itertools;
 
 use crate::chop_up::function::Function;
-use crate::chop_up::instruction::{
-    DataType, InstructionType, MemoryInstructionType,
-};
-use crate::chop_up::utils::*;
+use crate::chop_up::instruction::{DataType, InstructionType, MemoryInstructionType};
 use crate::chop_up::instruction_stream::{Instruction, StackEffect, StackValue};
+use crate::chop_up::utils::*;
 
 pub struct WatEmitter<'a> {
     output_writer: &'a mut dyn Write,
@@ -311,7 +309,8 @@ impl<'a> WatEmitter<'a> {
     }
 }
 
-const TRANSACTION_FUNCTION_SIGNATURE: &str = "(type $utx_f) (param $tx i32) (param $utx i32) (param $state i32) (result i32)";
+const TRANSACTION_FUNCTION_SIGNATURE: &str =
+    "(type $utx_f) (param $tx i32) (param $utx i32) (param $state i32) (result i32)";
 const INSTRUCTION_INDENT: usize = 2;
 const MODULE_INDENT: usize = 0;
 const INDENTATION_STR: &str = "    ";

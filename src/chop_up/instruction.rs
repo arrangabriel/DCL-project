@@ -1,13 +1,14 @@
-use crate::chop_up::instruction_stream::StackValue;
 use crate::chop_up::instruction::DataType::*;
 use crate::chop_up::instruction::InstructionType::{Benign, Memory};
 use crate::chop_up::instruction_stream::Instruction;
+use crate::chop_up::instruction_stream::StackValue;
+use anyhow::{anyhow, Result};
 use wast::core::{Instruction as WastInstruction, ValType};
 use WastInstruction::{
     Block, DataDrop, ElemDrop, End, F32Load, F32Store, F64Load, F64Store, GlobalGet, GlobalSet,
-    I32Load, I32Load16u, I32Store, I32Store8, I64Load, I64Store, I64Store8,
-    MemoryCopy, MemoryDiscard, MemoryFill, MemoryGrow, MemoryInit, MemorySize, Return, TableCopy,
-    TableFill, TableGet, TableGrow, TableInit, TableSet, TableSize,
+    I32Load, I32Load16u, I32Store, I32Store8, I64Load, I64Store, I64Store8, MemoryCopy,
+    MemoryDiscard, MemoryFill, MemoryGrow, MemoryInit, MemorySize, Return, TableCopy, TableFill,
+    TableGet, TableGrow, TableInit, TableSet, TableSize,
 };
 
 #[derive(PartialEq, Clone)]
@@ -19,9 +20,17 @@ pub enum InstructionType {
 impl From<&WastInstruction<'_>> for InstructionType {
     fn from(value: &WastInstruction<'_>) -> Self {
         if let Some((ty, offset, subtype)) = type_from_load(value) {
-            Memory(MemoryInstructionType::Load { ty, offset, subtype})
+            Memory(MemoryInstructionType::Load {
+                ty,
+                offset,
+                subtype,
+            })
         } else if let Some((ty, offset, subtype)) = type_from_store(value) {
-            Memory(MemoryInstructionType::Store { ty, offset, subtype })
+            Memory(MemoryInstructionType::Store {
+                ty,
+                offset,
+                subtype,
+            })
         } else if is_other_memory_instruction(value) {
             panic!(
                 "Unsupported instruction read when producing InstructionType - {:?}",
@@ -61,14 +70,22 @@ pub enum BlockInstructionType {
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum MemoryInstructionType {
-    Load { ty: DataType, offset: u64, subtype: Option<MemoryInstructionSubtype>},
-    Store { ty: DataType, offset: u64, subtype: Option<MemoryInstructionSubtype> },
+    Load {
+        ty: DataType,
+        offset: u64,
+        subtype: Option<MemoryInstructionSubtype>,
+    },
+    Store {
+        ty: DataType,
+        offset: u64,
+        subtype: Option<MemoryInstructionSubtype>,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum MemoryInstructionSubtype {
     SixteenU,
-    Eight
+    Eight,
 }
 
 impl MemoryInstructionSubtype {
@@ -81,16 +98,12 @@ impl MemoryInstructionSubtype {
 }
 
 impl MemoryInstructionType {
-    pub fn needs_split(
-        &self,
-        stack: &[StackValue],
-        skip_safe_splits: bool,
-    ) -> Result<bool, &'static str> {
+    pub fn needs_split(&self, stack: &[StackValue], skip_safe_splits: bool) -> Result<bool> {
         let needs_split = match self {
             MemoryInstructionType::Load { .. } => {
                 let last_is_safe = stack
                     .last()
-                    .ok_or("Load with empty stack - program is malformed")?
+                    .ok_or(anyhow!("Load with empty stack - program is malformed"))?
                     .is_safe;
                 !(last_is_safe && skip_safe_splits)
             }
@@ -139,7 +152,9 @@ impl From<ValType<'_>> for DataType {
 }
 
 // TODO - need to add all instructions (u16, u32...)
-fn type_from_load(instruction: &WastInstruction) -> Option<(DataType, u64, Option<MemoryInstructionSubtype>)> {
+fn type_from_load(
+    instruction: &WastInstruction,
+) -> Option<(DataType, u64, Option<MemoryInstructionSubtype>)> {
     match instruction {
         I32Load16u(arg) => Some((I32, arg.offset, Some(MemoryInstructionSubtype::SixteenU))),
         I32Load(arg) => Some((I32, arg.offset, None)),
@@ -150,7 +165,9 @@ fn type_from_load(instruction: &WastInstruction) -> Option<(DataType, u64, Optio
     }
 }
 
-fn type_from_store(instruction: &WastInstruction) -> Option<(DataType, u64, Option<MemoryInstructionSubtype>)> {
+fn type_from_store(
+    instruction: &WastInstruction,
+) -> Option<(DataType, u64, Option<MemoryInstructionSubtype>)> {
     match instruction {
         I32Store8(arg) => Some((I32, arg.offset, Some(MemoryInstructionSubtype::Eight))),
         I64Store8(arg) => Some((I32, arg.offset, Some(MemoryInstructionSubtype::Eight))),
@@ -163,8 +180,24 @@ fn type_from_store(instruction: &WastInstruction) -> Option<(DataType, u64, Opti
 }
 
 fn is_other_memory_instruction(instruction: &WastInstruction) -> bool {
-    matches!(instruction, GlobalGet(_) | GlobalSet(_) | TableGet(_) | TableSet(_) | MemorySize(_) | MemoryGrow(_)
-        | MemoryInit(_) | MemoryCopy(_) | MemoryFill(_) | MemoryDiscard(_) | DataDrop(_)
-        | ElemDrop(_) | TableInit(_) | TableCopy(_) | TableFill(_) | TableSize(_)
-        | TableGrow(_))
+    matches!(
+        instruction,
+        GlobalGet(_)
+            | GlobalSet(_)
+            | TableGet(_)
+            | TableSet(_)
+            | MemorySize(_)
+            | MemoryGrow(_)
+            | MemoryInit(_)
+            | MemoryCopy(_)
+            | MemoryFill(_)
+            | MemoryDiscard(_)
+            | DataDrop(_)
+            | ElemDrop(_)
+            | TableInit(_)
+            | TableCopy(_)
+            | TableFill(_)
+            | TableSize(_)
+            | TableGrow(_)
+    )
 }

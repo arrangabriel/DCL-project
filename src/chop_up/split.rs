@@ -1,10 +1,11 @@
-use crate::chop_up::instruction_stream::index_of_scope_end;
-use crate::chop_up::instruction::{DataType, MemoryInstructionType};
-use crate::chop_up::transform::{handle_instructions, setup_func};
 use crate::chop_up::emit::WatEmitter;
+use crate::chop_up::instruction::{DataType, MemoryInstructionType};
+use crate::chop_up::instruction_stream::index_of_scope_end;
 use crate::chop_up::instruction_stream::{Instruction, Scope, ScopeType, StackValue};
+use crate::chop_up::transform::{handle_instructions, setup_func};
 #[allow(unused_imports)] // This is due to a bug in my linter...
 use crate::chop_up::utils::{ADDRESS_LOCAL_NAME, STACK_JUGGLER_NAME};
+use anyhow::Result;
 
 pub fn setup_split<'a>(
     base_name: &str,
@@ -13,7 +14,7 @@ pub fn setup_split<'a>(
     locals: &[DataType],
     culprit_instruction_with_index: (&Instruction, MemoryInstructionType, usize),
     transformer: &mut WatEmitter,
-) -> Result<Vec<DeferredSplit<'a>>, &'static str> {
+) -> Result<Vec<DeferredSplit<'a>>> {
     let mut deferred_splits = Vec::default();
     if let Some(new_split) = handle_pre_split(
         base_name,
@@ -68,7 +69,11 @@ pub fn handle_pre_split<'a>(
                 1,
             )
         }
-        MemoryInstructionType::Store { ty, offset, subtype: _} => {
+        MemoryInstructionType::Store {
+            ty,
+            offset,
+            subtype: _,
+        } => {
             // TODO - do we need to take special care if subtype is not None?
             let ty = ty.as_str();
             let stack_juggler_local_name = format!("{ty}_{STACK_JUGGLER_NAME}");
@@ -159,7 +164,7 @@ pub fn handle_pre_split<'a>(
 pub fn handle_deferred_split<'a>(
     deferred_split: DeferredSplit<'a>,
     transformer: &mut WatEmitter,
-) -> Result<Vec<DeferredSplit<'a>>, &'static str> {
+) -> Result<Vec<DeferredSplit<'a>>> {
     setup_func(
         &deferred_split.name,
         deferred_split.instructions,

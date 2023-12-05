@@ -3,14 +3,16 @@ use std::io::Write;
 use wast::core::{Func, ModuleField, ModuleKind};
 use wast::Wat;
 
+use anyhow::{Error, Result};
+
+use crate::chop_up::emit::WatEmitter;
 use crate::chop_up::function::Function;
-use crate::chop_up::utils::{count_parens, get_line_from_offset, MODULE_MEMBER_INDENT};
 use crate::chop_up::instruction::{
     BenignInstructionType, BlockInstructionType, DataType, InstructionType,
 };
-use crate::chop_up::split::{DeferredSplit, handle_deferred_split, setup_split};
-use crate::chop_up::emit::WatEmitter;
 use crate::chop_up::instruction_stream::Instruction;
+use crate::chop_up::split::{handle_deferred_split, setup_split, DeferredSplit};
+use crate::chop_up::utils::{count_parens, get_line_from_offset, MODULE_MEMBER_INDENT};
 
 pub fn emit_transformed_wat(
     wat: &Wat,
@@ -19,14 +21,15 @@ pub fn emit_transformed_wat(
     skip_safe_splits: bool,
     state_size: usize,
     explain_splits: bool,
-) -> Result<(), &'static str> {
+) -> Result<()> {
     let module_fields = match wat {
         Wat::Module(module) => match &module.kind {
             ModuleKind::Text(fields) => Ok(fields),
             ModuleKind::Binary(_) => Err("ModuleKind is binary"),
         },
         Wat::Component(_) => Err("Input module is component"),
-    }?;
+    }
+    .map_err(Error::msg)?;
 
     let mut transformer = WatEmitter::new(writer, state_size, skip_safe_splits, explain_splits);
     transformer.emit_module();
@@ -71,14 +74,14 @@ pub fn emit_transformed_wat(
     Ok(())
 }
 
-fn extract_function<'a>(func: &'a Func, lines: &'a [&str]) -> Result<Function<'a>, &'static str> {
+fn extract_function<'a>(func: &'a Func, lines: &'a [&str]) -> Result<Function<'a>> {
     Function::new(func, lines)
 }
 
 fn handle_top_level_func<'a>(
     func: &'a Function,
     transformer: &mut WatEmitter,
-) -> Result<Vec<DeferredSplit<'a>>, &'static str> {
+) -> Result<Vec<DeferredSplit<'a>>> {
     if func.ignore() {
         transformer.emit_function(func);
         return Ok(Vec::default());
@@ -115,17 +118,14 @@ pub fn handle_instructions<'a>(
     locals: &[DataType],
     split_count: usize,
     transformer: &mut WatEmitter,
-) -> Result<Vec<DeferredSplit<'a>>, &'static str> {
+) -> Result<Vec<DeferredSplit<'a>>> {
     let deferred_splits: Vec<DeferredSplit> = Vec::default();
     for (i, instruction) in instructions.iter().enumerate() {
         transformer.current_scope_level = instruction.scopes.len();
         let ty = InstructionType::from(instruction);
         match ty {
             InstructionType::Memory(ty) => {
-                if ty.needs_split(
-                    &instruction.stack,
-                    transformer.skip_safe_splits,
-                )? {
+                if ty.needs_split(&instruction.stack, transformer.skip_safe_splits)? {
                     return setup_split(
                         name,
                         split_count + deferred_splits.len(),
@@ -166,7 +166,7 @@ pub fn handle_instructions<'a>(
                         BlockInstructionType::End => {
                             transformer.emit_instruction(")", None);
                             continue;
-                        },
+                        }
                     },
                     BenignInstructionType::Return => {
                         if instruction.stack.is_empty() {
@@ -182,4 +182,3 @@ pub fn handle_instructions<'a>(
     transformer.emit_end_func();
     Ok(deferred_splits)
 }
-

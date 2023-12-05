@@ -1,35 +1,40 @@
-use std::{env, io};
+use anyhow::{anyhow, Result};
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
+use std::{env, io};
 
 use chop_up::transform_wat_string;
 
-fn main() -> Result<(), String> {
+fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
-    let program_name = args.get(0)
+    let program_name = args
+        .get(0)
         .and_then(|name| name.split('/').last())
         .expect("Program name should always be an argument");
 
     let config = parse_config(&args[1..]).map_err(|err| {
-        eprintln!("\
+        eprintln!(
+            "\
 Usage {program_name} [input_file] [state_size] [opts...]
 Possible opts are:
   --skip-safe        optimize splits by skipping accesses to function arguments
   --explain-splits   add explanatory comments to transformed code
-        ");
-        err
+        "
+        );
+        anyhow!(err)
     })?;
 
     let file_path = Path::new(config.file_path);
     let mut wat_string = String::new();
 
     if !file_path.is_file() {
-        return Err(format!("No such file: {}", config.file_path));
+        return Err(anyhow!("No such file: {}", config.file_path));
     }
 
-    File::open(file_path).and_then(|mut file| file.read_to_string(&mut wat_string))
-        .map_err(|err| format!("Failed to read file: {err:?}"))?;
+    File::open(file_path)
+        .and_then(|mut file| file.read_to_string(&mut wat_string))
+        .map_err(|err| anyhow!("Failed to read file: {err:?}"))?;
 
     transform_wat_string(
         wat_string.as_str(),
@@ -37,7 +42,7 @@ Possible opts are:
         config.state_size,
         config.skip_safe,
         config.explain_splits,
-    ).map_err(|err| format!("Failed to parse file: {err}"))
+    )
 }
 
 struct Config<'a> {
@@ -60,7 +65,8 @@ impl<'a> Config<'a> {
 
 fn parse_config(args: &[String]) -> Result<Config, String> {
     let file_path = args.get(0).ok_or("Missing file path")?;
-    let state_size = args.get(1)
+    let state_size = args
+        .get(1)
         .ok_or("Missing state size")?
         .parse()
         .map_err(|_| "State size must be a positive integer")?;
