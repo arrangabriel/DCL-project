@@ -14,7 +14,7 @@ pub fn setup_split<'a>(
     locals: &[DataType],
     culprit_instruction_with_index: (&Instruction, MemoryInstructionType, usize),
     transformer: &mut WatEmitter,
-) -> Result<Vec<DeferredSplit<'a>>> {
+) -> Result<Vec<Split<'a>>> {
     let mut deferred_splits = Vec::default();
     if let Some(new_split) = handle_pre_split(
         base_name,
@@ -27,8 +27,10 @@ pub fn setup_split<'a>(
         deferred_splits.push(new_split);
     }
     if culprit_instruction_with_index.0.scopes.is_empty() {
+        // Split happens in top-level scope
         transformer.emit_end_func();
     } else {
+        // Split happens in some inner scope
         transformer.emit_instruction("return", None);
         let scope_end = index_of_scope_end(instructions)?;
         let mut sub_splits = handle_instructions(
@@ -50,9 +52,9 @@ pub fn handle_pre_split<'a>(
     locals: &[DataType],
     split_count: usize,
     transformer: &mut WatEmitter,
-) -> Option<DeferredSplit<'a>> {
+) -> Option<Split<'a>> {
     let (culprit, culprit_type, culprit_index) = culprit_instruction_with_index;
-    let (pre_split, to_remove) = match culprit_type {
+    let (pre_split_instructions, to_remove) = match culprit_type {
         MemoryInstructionType::Load { offset, .. } => {
             let set_address = format!("local.set ${ADDRESS_LOCAL_NAME}");
             let get_address = format!("local.get ${ADDRESS_LOCAL_NAME}");
@@ -74,7 +76,6 @@ pub fn handle_pre_split<'a>(
             offset,
             subtype: _,
         } => {
-            // TODO - do we need to take special care if subtype is not None?
             let ty = ty.as_str();
             let stack_juggler_local_name = format!("{ty}_{STACK_JUGGLER_NAME}");
             let set_value = format!("local.set ${stack_juggler_local_name}");
@@ -110,7 +111,7 @@ pub fn handle_pre_split<'a>(
         }
     };
 
-    for (pre_split_instr, annotation) in pre_split {
+    for (pre_split_instr, annotation) in pre_split_instructions {
         transformer.emit_instruction(&pre_split_instr, annotation);
     }
     transformer.emit_instruction("local.get $utx", Some("Save naddr = 1".into()));
@@ -132,7 +133,8 @@ pub fn handle_pre_split<'a>(
     );
 
     // Check if a split has already been created for this instruction,
-    // if so simply return that table index
+    // if so return existing index
+    // else return new function index (derived from the current function count)
     let existing_index = transformer
         .utx_function_names
         .iter()
@@ -148,7 +150,7 @@ pub fn handle_pre_split<'a>(
         transformer
             .utx_function_names
             .push((culprit_index, name.clone()));
-        Some(DeferredSplit {
+        Some(Split {
             name,
             culprit_type,
             instructions,
@@ -161,41 +163,36 @@ pub fn handle_pre_split<'a>(
     }
 }
 
-pub fn handle_deferred_split<'a>(
-    deferred_split: DeferredSplit<'a>,
+pub fn handle_split<'a>(
+    split: Split<'a>,
     transformer: &mut WatEmitter,
-) -> Result<Vec<DeferredSplit<'a>>> {
+) -> Result<Vec<Split<'a>>> {
     setup_func(
-        &deferred_split.name,
-        deferred_split.instructions,
-        &deferred_split.locals,
+        &split.name,
+        split.instructions,
+        &split.locals,
         transformer,
     );
     transformer.emit_restore_locals(
-        &deferred_split.locals,
+        &split.locals,
         transformer.stack_base,
-        &deferred_split.saved_stack,
+        &split.saved_stack,
     );
-    if deferred_split.scopes.is_empty() {
-        transformer.emit_restore_stack(
-            &deferred_split.saved_stack,
-            0,
-            deferred_split.saved_stack.len(),
-        );
+    if split.scopes.is_empty() {
+        transformer.emit_restore_stack(&split.saved_stack, 0, split.saved_stack.len());
     } else {
         transformer.current_scope_level = 0;
         let mut curr_stack_base = 0;
-        for scope in &deferred_split.scopes {
+        for scope in &split.scopes {
             match scope.ty {
                 ScopeType::Block => {
                     transformer.emit_restore_stack(
-                        &deferred_split.saved_stack,
+                        &split.saved_stack,
                         curr_stack_base,
                         scope.stack_start,
                     );
                     curr_stack_base = scope.stack_start;
                     let instruction = if let Some(name) = &scope.name {
-                        // TODO - we need to enforce either (block) or `block end`
                         format!("(block ${name}")
                     } else {
                         "(block".into()
@@ -205,14 +202,9 @@ pub fn handle_deferred_split<'a>(
                 }
             }
         }
-        transformer.emit_restore_stack(
-            &deferred_split.saved_stack,
-            curr_stack_base,
-            deferred_split.saved_stack.len(),
-        );
+        transformer.emit_restore_stack(&split.saved_stack, curr_stack_base, split.saved_stack.len());
     }
-    let post_split: Vec<(String, Option<String>)> = match deferred_split.culprit_type {
-        // TODO - this needs to emit the correct load type (e.g. i32.load16_u ...)
+    let instructions: Vec<(String, Option<String>)> = match split.culprit_type {
         MemoryInstructionType::Load { ty, subtype, .. } => {
             let subtype_str = subtype.map(|ty| ty.as_str()).unwrap_or("");
             let load_data_type = format!("{}.load{subtype_str}", ty.as_str());
@@ -246,22 +238,21 @@ pub fn handle_deferred_split<'a>(
         }
     };
 
-    for (post_split_instr, annotation) in post_split {
+    for (post_split_instr, annotation) in instructions {
         transformer.emit_instruction(&post_split_instr, annotation);
     }
 
-    // This call recurses indirectly
     handle_instructions(
-        &deferred_split.name,
-        deferred_split.instructions,
-        &deferred_split.locals,
+        &split.name,
+        split.instructions,
+        &split.locals,
         0,
         transformer,
     )
 }
 
 #[derive(Clone)]
-pub struct DeferredSplit<'a> {
+pub struct Split<'a> {
     name: String,
     culprit_type: MemoryInstructionType,
     instructions: &'a [Instruction<'a>],

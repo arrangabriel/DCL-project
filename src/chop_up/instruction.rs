@@ -4,6 +4,7 @@ use crate::chop_up::instruction_stream::Instruction;
 use crate::chop_up::instruction_stream::StackValue;
 use anyhow::{anyhow, Result};
 use wast::core::{Instruction as WastInstruction, ValType};
+use wast::core::Instruction::{I32Store16, I64Load32u, I64Store16};
 use WastInstruction::{
     Block, DataDrop, ElemDrop, End, F32Load, F32Store, F64Load, F64Store, GlobalGet, GlobalSet,
     I32Load, I32Load16u, I32Store, I32Store8, I64Load, I64Store, I64Store8, MemoryCopy,
@@ -85,14 +86,18 @@ pub enum MemoryInstructionType {
 #[derive(Clone, Copy, PartialEq)]
 pub enum MemoryInstructionSubtype {
     SixteenU,
+    ThirtyTwoU,
     Eight,
+    Sixteen
 }
 
 impl MemoryInstructionSubtype {
     pub fn as_str(&self) -> &'static str {
         match self {
             MemoryInstructionSubtype::SixteenU => "16_u",
+            MemoryInstructionSubtype::Sixteen => "16",
             MemoryInstructionSubtype::Eight => "8",
+            MemoryInstructionSubtype::ThirtyTwoU => "32_u",
         }
     }
 }
@@ -151,14 +156,14 @@ impl From<ValType<'_>> for DataType {
     }
 }
 
-// TODO - need to add all instructions (u16, u32...)
 fn type_from_load(
     instruction: &WastInstruction,
 ) -> Option<(DataType, u64, Option<MemoryInstructionSubtype>)> {
     match instruction {
-        I32Load16u(arg) => Some((I32, arg.offset, Some(MemoryInstructionSubtype::SixteenU))),
         I32Load(arg) => Some((I32, arg.offset, None)),
+        I32Load16u(arg) => Some((I32, arg.offset, Some(MemoryInstructionSubtype::SixteenU))),
         I64Load(arg) => Some((I64, arg.offset, None)),
+        I64Load32u(arg) => Some((I64, arg.offset, Some(MemoryInstructionSubtype::ThirtyTwoU))),
         F32Load(arg) => Some((F32, arg.offset, None)),
         F64Load(arg) => Some((F64, arg.offset, None)),
         _ => None,
@@ -169,10 +174,12 @@ fn type_from_store(
     instruction: &WastInstruction,
 ) -> Option<(DataType, u64, Option<MemoryInstructionSubtype>)> {
     match instruction {
-        I32Store8(arg) => Some((I32, arg.offset, Some(MemoryInstructionSubtype::Eight))),
-        I64Store8(arg) => Some((I32, arg.offset, Some(MemoryInstructionSubtype::Eight))),
         I32Store(arg) => Some((I32, arg.offset, None)),
+        I32Store8(arg) => Some((I32, arg.offset, Some(MemoryInstructionSubtype::Eight))),
+        I32Store16(arg) => Some((I32, arg.offset, Some(MemoryInstructionSubtype::Sixteen))),
         I64Store(arg) => Some((I64, arg.offset, None)),
+        I64Store8(arg) => Some((I64, arg.offset, Some(MemoryInstructionSubtype::Eight))),
+        I64Store16(arg) => Some((I64, arg.offset, Some(MemoryInstructionSubtype::Sixteen))),
         F32Store(arg) => Some((F32, arg.offset, None)),
         F64Store(arg) => Some((F64, arg.offset, None)),
         _ => None,

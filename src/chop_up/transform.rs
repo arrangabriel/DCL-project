@@ -11,7 +11,7 @@ use crate::chop_up::instruction::{
     BenignInstructionType, BlockInstructionType, DataType, InstructionType,
 };
 use crate::chop_up::instruction_stream::Instruction;
-use crate::chop_up::split::{handle_deferred_split, setup_split, DeferredSplit};
+use crate::chop_up::split::{handle_split, setup_split, Split};
 use crate::chop_up::utils::{count_parens, get_line_from_offset, MODULE_MEMBER_INDENT};
 
 pub fn emit_transformed_wat(
@@ -28,8 +28,7 @@ pub fn emit_transformed_wat(
             ModuleKind::Binary(_) => Err("ModuleKind is binary"),
         },
         Wat::Component(_) => Err("Input module is component"),
-    }
-    .map_err(Error::msg)?;
+    }.map_err(Error::msg)?;
 
     let mut transformer = WatEmitter::new(writer, state_size, skip_safe_splits, explain_splits);
     transformer.emit_module();
@@ -46,16 +45,18 @@ pub fn emit_transformed_wat(
         }
     }
 
-    let mut deferred_splits = Vec::default();
+    let mut splits = Vec::default();
     for func in &functions {
         let mut new_splits = handle_top_level_func(func, &mut transformer)?;
-        deferred_splits.append(&mut new_splits);
+        splits.append(&mut new_splits);
     }
 
-    while !deferred_splits.is_empty() {
-        deferred_splits = deferred_splits
+    while !splits.is_empty() {
+        // Creating a split may create new splits,
+        // therefore keep this loop going until none more remain
+        splits = splits
             .drain(..)
-            .flat_map(|split| handle_deferred_split(split, &mut transformer).unwrap())
+            .flat_map(|split| handle_split(split, &mut transformer).unwrap())
             .collect();
     }
 
@@ -81,7 +82,7 @@ fn extract_function<'a>(func: &'a Func, lines: &'a [&str]) -> Result<Function<'a
 fn handle_top_level_func<'a>(
     func: &'a Function,
     transformer: &mut WatEmitter,
-) -> Result<Vec<DeferredSplit<'a>>> {
+) -> Result<Vec<Split<'a>>> {
     if func.ignore() {
         transformer.emit_function(func);
         return Ok(Vec::default());
@@ -118,8 +119,8 @@ pub fn handle_instructions<'a>(
     locals: &[DataType],
     split_count: usize,
     transformer: &mut WatEmitter,
-) -> Result<Vec<DeferredSplit<'a>>> {
-    let deferred_splits: Vec<DeferredSplit> = Vec::default();
+) -> Result<Vec<Split<'a>>> {
+    let deferred_splits: Vec<Split> = Vec::default();
     for (i, instruction) in instructions.iter().enumerate() {
         transformer.current_scope_level = instruction.scopes.len();
         let ty = InstructionType::from(instruction);

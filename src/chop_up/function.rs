@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Result};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
-use wast::core::Instruction as WastInstruction;
 use wast::core::{Func, FuncKind};
+use wast::core::Instruction as WastInstruction;
 use wast::token::Index;
 
 use crate::chop_up::instruction::{
@@ -46,9 +46,9 @@ impl<'a> Function<'a> {
         let function_member_base_line_index = function_line_index + 1;
         let instruction_base_line_index = function_member_base_line_index
             + lines[function_member_base_line_index..]
-                .iter()
-                .take_while(|line| line.contains("(local"))
-                .count();
+            .iter()
+            .take_while(|line| line.contains("(local"))
+            .count();
 
         let mut instructions_with_raw_text = Vec::new();
         let mut remapped_locals: Vec<(u32, u32)> = Vec::new();
@@ -99,7 +99,7 @@ impl<'a> Function<'a> {
                             instruction_string = format!(
                                 "{base_instruction} {new_name}",
                                 base_instruction =
-                                    &instruction_string[..instruction_string.len() - 2]
+                                &instruction_string[..instruction_string.len() - 2]
                             );
                         }
                     }
@@ -160,16 +160,9 @@ impl<'a> Function<'a> {
                         });
                     }
                     BlockInstructionType::End => {
-                        let scope = current_scopes.pop().ok_or(anyhow!(
-                            "Unbalanced scopes - tried to remove top-level scope"
-                        ))?;
-                        match scope.ty {
-                            ScopeType::Block => {
-                                // TODO
-                                // Slice off popped scope stack
-                                // returns in particular
-                            }
-                        }
+                        current_scopes.pop().ok_or(
+                            anyhow!("Unbalanced scopes - tried to remove top-level scope")
+                        )?;
                     }
                 }
             }
@@ -183,7 +176,7 @@ impl<'a> Function<'a> {
 
         let mut instructions = Vec::default();
         for (i, (instruction, raw_text, stack, scopes)) in
-            instructions_with_stack_and_scope.into_iter().enumerate()
+        instructions_with_stack_and_scope.into_iter().enumerate()
         {
             instructions.push(Instruction::new(
                 instruction,
@@ -216,4 +209,5 @@ fn gen_random_func_name() -> String {
     format!("funcid_{rand_id}")
 }
 
+/// Function names that start with this prefix are not to be transformed
 const IGNORE_FUNC_PREFIX: &str = "__";
