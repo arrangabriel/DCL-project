@@ -1,43 +1,24 @@
-WASI_SDK_PATH := /Users/arrankg/dev/university/DCLproject/wasi-sdk-20.0
 CC := ${WASI_SDK_PATH}/bin/clang
-CFLAGS := -g -O3 -I./
-MAKEFLAGS += --no-print-directory
+CFLAGS := -g -O3 -I./ -Wall -Werror
 
-check:
-	$(MAKE) check-no-abi-native
-	@printf "\n\n"
-	$(MAKE) check-no-abi-wasm
-	@printf "\n\n"
-	$(MAKE) check-abi-0-native
-	@printf "\n\n"
-	$(MAKE) check-abi-0-wasm
+check-%-split: %.wat runtime-%.wat
+	cargo run -q $< 6 | wasmtime run --preload contract=- $(word 2,$^)
 
-
-check-%-native: system-%.elf
-	./$<
-
-check-%-wasm: payment-%.wasm runtime-%.wasm
+check-%: %.wat runtime-%.wat
 	wasmtime run --preload contract=$^
 
-check-%: payment-%.wat runtime-abi-0.wat
-	wasmtime run --preload contract=$^
-
-system-%.elf: payment-%.c runtime-%.c
-	$(CC) $(CFLAGS) $^ -o $@
-
-payment-%.wasm: payment-%.c
-	$(CC) $(CFLAGS) --target=wasm32 -D__WASM__ --no-standard-libraries \
-              -Wl,--export-all -Wl,--no-entry $< -o $@
+%.wat: %.wasm
+	wasm2wat $< -o $@
 
 runtime-%.wasm: runtime-%.c
 	$(CC) $(CFLAGS) --target=wasm32-wasi -D__WASM__ \
               $< -o $@
 
-%.wat: %.wasm
-	wasm2wat $< -o $@
+%.wasm: %.c
+	$(CC) $(CFLAGS) --target=wasm32 -D__WASM__ --no-standard-libraries \
+              -Wl,--export-all -Wl,--no-entry $< -o $@
 
 clean:
 	-rm *.wasm *.wat *.elf
 
 .NOTINTERMEDIATE:
-.PHONY: check check-%

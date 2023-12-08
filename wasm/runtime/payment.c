@@ -1,9 +1,12 @@
-#include <abi-0.h>
+#include <abi.h>
 #include <payment.h>
 #include <stddef.h>
 #include <stdint.h>
 
 static uint64_t balances[NUSER];
+
+static struct state __state;
+static struct tx __tx;
 
 static void *mint(struct tx *tx, struct utx *utx, struct state *state)
 {
@@ -55,13 +58,6 @@ void *enter(void *_tx, struct utx *utx, struct state *state)
 		return pay(tx, utx, state);
 }
 
-
-typedef void *(* utx_t)(void *, struct utx *, struct state *);
-
-static struct state __state;
-static struct utx __utx;
-static struct tx __tx;
-
 void *__enter(uint32_t user, uint32_t to, uint32_t amount)
 {
 	__state.user = user;
@@ -76,24 +72,9 @@ void *__enter(uint32_t user, uint32_t to, uint32_t amount)
 
 void *__step(void *callsite)
 {
-	utx_t utx_func = callsite;
+	utx_func_t utx_func = callsite;
 
 	return utx_func(&__tx, &__utx, &__state);
-}
-
-uint32_t __get_utx_addrs(uint8_t index)
-{
-	return __utx.addrs[index];
-}
-
-uint8_t __get_utx_log2lens(uint8_t index)
-{
-	return __utx.log2lens[index];
-}
-
-uint8_t __get_utx_naddr(void)
-{
-	return __utx.naddr;
 }
 
 uint64_t __get_balance(uint32_t user)
