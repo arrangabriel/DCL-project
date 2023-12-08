@@ -73,7 +73,6 @@ void *__enter(uint32_t user, uint32_t to, uint32_t amount)
 void *__step(void *callsite)
 {
 	utx_func_t utx_func = callsite;
-
 	return utx_func(&__tx, &__utx, &__state);
 }
 
