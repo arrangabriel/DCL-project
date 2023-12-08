@@ -41,6 +41,7 @@ pub fn emit_transformed_wat(
             ModuleField::Export(export) => module_members.push(export.span.offset()),
             ModuleField::Type(ty) => module_members.push(ty.span.offset()),
             ModuleField::Global(global) => module_members.push(global.span.offset()),
+            ModuleField::Data(data) => module_members.push(data.span.offset()),
             _ => { /* Other module fields might need to be handled at a later date */ }
         }
     }
