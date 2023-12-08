@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define NUSER  100
+#define NUSERS  100
 #define MINTER 0
 
 struct tx

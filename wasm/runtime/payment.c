@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-static uint64_t balances[NUSER];
+static uint32_t balances[NUSERS];
 
 static struct state __state;
 static struct tx __tx;
@@ -38,7 +38,7 @@ static void *pay(struct tx *tx, struct utx *utx, struct state *state)
 
 void *enter(void *_tx, struct utx *utx, struct state *state)
 {
-	if (state->user >= NUSER)
+	if (state->user >= NUSERS)
 		return NULL;
 	if (state->txlen != sizeof (struct tx))
 		return NULL;
@@ -47,7 +47,7 @@ void *enter(void *_tx, struct utx *utx, struct state *state)
 
 	if (tx->to == state->user)
 		return NULL;
-	if (tx->to >= NUSER)
+	if (tx->to >= NUSERS)
 		return NULL;
 	if (tx->amount == 0)
 		return NULL;
@@ -76,17 +76,7 @@ void *__step(void *callsite)
 	return utx_func(&__tx, &__utx, &__state);
 }
 
-uint64_t __get_balance(uint32_t user)
+uint32_t __get_balance(uint32_t user)
 {
 	return balances[user];
-}
-
-uint32_t __get_user(void)
-{
-    return __state.user;
-}
-
-char __get_transform_storage(uint32_t index)
-{
-    return __state.transform_storage[index];
 }

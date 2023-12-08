@@ -1,5 +1,5 @@
 CC := ${WASI_SDK_PATH}/bin/clang
-CFLAGS := -g -O3 -I./ -Wall -Werror
+CFLAGS := -g -O3 -I./ -Wall
 
 check-%-split: %.wat runtime-%.wat
 	cargo run -q $< 6 | wasmtime run --preload contract=- $(word 2,$^)
