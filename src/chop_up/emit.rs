@@ -14,7 +14,7 @@ pub struct WatEmitter<'a> {
     pub stack_base: usize,
     pub utx_function_names: Vec<(usize, String)>,
     pub current_scope_level: usize,
-    explain_splits: bool,
+    explain: bool,
 }
 
 impl<'a> WatEmitter<'a> {
@@ -22,7 +22,7 @@ impl<'a> WatEmitter<'a> {
         output_writer: &'a mut dyn Write,
         state_base: usize,
         skip_safe_splits: bool,
-        explain_splits: bool,
+        explain: bool,
     ) -> Self {
         Self {
             output_writer,
@@ -31,7 +31,7 @@ impl<'a> WatEmitter<'a> {
             stack_base: state_base + 8,
             utx_function_names: Vec::default(),
             current_scope_level: 0,
-            explain_splits,
+            explain,
         }
     }
 
@@ -114,7 +114,7 @@ impl<'a> WatEmitter<'a> {
     }
 
     pub fn emit_instruction(&mut self, instruction: &str, annotation: Option<String>) {
-        let instruction = if self.explain_splits {
+        let instruction = if self.explain {
             match annotation {
                 Some(annotation) => format!("{instruction:<30};;{annotation}"),
                 None => instruction.into(),

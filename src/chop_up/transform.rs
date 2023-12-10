@@ -20,7 +20,7 @@ pub fn emit_transformed_wat(
     writer: &mut dyn Write,
     skip_safe_splits: bool,
     state_size: usize,
-    explain_splits: bool,
+    explain: bool,
 ) -> Result<()> {
     let module_fields = match wat {
         Wat::Module(module) => match &module.kind {
@@ -30,7 +30,7 @@ pub fn emit_transformed_wat(
         Wat::Component(_) => Err("Input module is component"),
     }.map_err(Error::msg)?;
 
-    let mut transformer = WatEmitter::new(writer, state_size, skip_safe_splits, explain_splits);
+    let mut transformer = WatEmitter::new(writer, state_size, skip_safe_splits, explain);
     transformer.emit_module();
 
     let mut functions = Vec::default();

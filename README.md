@@ -13,3 +13,47 @@ With this information the runtime can make informed scheduling decisions when in
 Performing this yield is not a trivial task, as it requires transforming the code itself to conform to the syntax and semantics of such a system, 
 while preserving the semantics of the original transaction.
 This tool performs the transformation on transactions in the [WebAssembly text-format](https://developer.mozilla.org/en-US/docs/WebAssembly/Understanding_the_text_format).
+
+# Usage
+
+Build using cargo
+```shell
+$ cargo build
+```
+
+Run on `.wat` file
+```shell
+$ chop_up [input] [state size] > [output]
+```
+
+Alternatively build and run with single command
+```shell
+$ cargo run [input] [state size] > [output]
+```
+
+Optional flags:
+ - `--skip-safe` - attempt to make optimized split decisions
+ - `--explain` - add explanatory comments to output
+
+Run tests
+```shell
+$ cargo test
+```
+
+# Build and run examples
+
+To build the examples a [wasi-enabled](https://github.com/WebAssembly/wasi-sdk) compiler is needed.
+
+```shell
+$ cd wasm/runtime
+```
+
+Run without transformation
+```shell
+$ make check-{payment|auction}
+```
+
+Run with transformation
+```shell
+$ make check-{payment|auction}-split
+```

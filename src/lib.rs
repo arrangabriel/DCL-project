@@ -12,7 +12,7 @@ pub fn transform_wat_string(
     writer: &mut dyn Write,
     state_size: usize,
     skip_safe_splits: bool,
-    explain_splits: bool,
+    explain: bool,
 ) -> Result<()> {
     let buffer = ParseBuffer::new(wast_string)?;
     let wat = parse(&buffer)?;
@@ -22,6 +22,6 @@ pub fn transform_wat_string(
         writer,
         skip_safe_splits,
         state_size,
-        explain_splits,
+        explain,
     )
 }

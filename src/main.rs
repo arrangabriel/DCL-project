@@ -1,8 +1,9 @@
-use anyhow::{anyhow, Result};
+use std::{env, io};
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use std::{env, io};
+
+use anyhow::{anyhow, Result};
 
 use chop_up::transform_wat_string;
 
@@ -14,14 +15,7 @@ fn main() -> Result<()> {
         .expect("Program name should always be an argument");
 
     let config = parse_config(&args[1..]).map_err(|err| {
-        eprintln!(
-            "\
-Usage {program_name} [input_file] [state_size] [opts...]
-Possible opts are:
-  --skip-safe        optimize splits by skipping accesses to function arguments
-  --explain-splits   add explanatory comments to transformed code
-        "
-        );
+        eprintln!("Usage {program_name} [input_file] [state_size] [opts...]");
         anyhow!(err)
     })?;
 
@@ -41,7 +35,7 @@ Possible opts are:
         &mut io::stdout(),
         config.state_size,
         config.skip_safe,
-        config.explain_splits,
+        config.explain,
     )
 }
 
@@ -49,7 +43,7 @@ struct Config<'a> {
     file_path: &'a str,
     state_size: usize,
     skip_safe: bool,
-    explain_splits: bool,
+    explain: bool,
 }
 
 impl<'a> Config<'a> {
@@ -58,7 +52,7 @@ impl<'a> Config<'a> {
             file_path,
             state_size,
             skip_safe: false,
-            explain_splits: false,
+            explain: false,
         }
     }
 }
@@ -75,9 +69,14 @@ fn parse_config(args: &[String]) -> Result<Config, String> {
     for flag in args[2..].iter() {
         match flag.as_str() {
             "--skip-safe" => config.skip_safe = true,
-            "--explain-splits" => config.explain_splits = true,
+            "--explain" => config.explain = true,
             _ => {
-                return Err(format!("Unknown flag {flag}"));
+                return Err(format!("\
+Unknown opt {flag}
+Possible opts are:
+  --skip-safe  optimize splits by skipping accesses to function arguments
+  --explain    add explanatory comments to transformed code")
+                );
             }
         }
     }
