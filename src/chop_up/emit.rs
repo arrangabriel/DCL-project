@@ -58,12 +58,14 @@ impl<'a> WatEmitter<'a> {
             self.emit_all_locals();
             return;
         }
-        let mut stack = Vec::<DataType>::new();
+        // Figure out which stack juggler locals are needed to be able to save the stack,
+        // and load/store arguments
+        let mut stack = Vec::new();
         for instruction in instructions {
             if let InstructionType::Memory(instr_type) = InstructionType::from(instruction) {
-                stack.pop();
                 self.emit_instruction(&format!("(local ${ADDRESS_LOCAL_NAME} i32)"), None);
-                let mut types: Vec<DataType> = Vec::new();
+                stack.pop();
+                let mut types = Vec::new();
                 if let MemoryInstructionType::Store { ty, .. } = instr_type {
                     stack.pop();
                     types.push(ty);

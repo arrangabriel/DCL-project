@@ -210,4 +210,4 @@ fn gen_random_func_name() -> String {
 }
 
 /// Function names that start with this prefix are not to be transformed
-const IGNORE_FUNC_PREFIX: &str = "__";
+pub const IGNORE_FUNC_PREFIX: &str = "__";

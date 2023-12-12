@@ -1,9 +1,8 @@
 use std::io::Write;
 
-use wast::core::{Func, ModuleField, ModuleKind};
+use anyhow::Result;
+use wast::core::{Func, ModuleField};
 use wast::Wat;
-
-use anyhow::{Error, Result};
 
 use crate::chop_up::emit::WatEmitter;
 use crate::chop_up::function::Function;
@@ -13,6 +12,7 @@ use crate::chop_up::instruction::{
 use crate::chop_up::instruction_stream::Instruction;
 use crate::chop_up::split::{handle_split, setup_split, Split};
 use crate::chop_up::utils::{count_parens, get_line_from_offset, MODULE_MEMBER_INDENT};
+use crate::extract_module_fields;
 
 pub fn emit_transformed_wat(
     wat: &Wat,
@@ -22,20 +22,12 @@ pub fn emit_transformed_wat(
     state_size: usize,
     explain: bool,
 ) -> Result<()> {
-    let module_fields = match wat {
-        Wat::Module(module) => match &module.kind {
-            ModuleKind::Text(fields) => Ok(fields),
-            ModuleKind::Binary(_) => Err("ModuleKind is binary"),
-        },
-        Wat::Component(_) => Err("Input module is component"),
-    }.map_err(Error::msg)?;
-
     let mut transformer = WatEmitter::new(writer, state_size, skip_safe_splits, explain);
     transformer.emit_module();
 
     let mut functions = Vec::default();
     let mut module_members = Vec::default();
-    for field in module_fields {
+    for field in extract_module_fields(wat)? {
         match field {
             ModuleField::Func(func) => functions.push(extract_function(func, lines)?),
             ModuleField::Export(export) => module_members.push(export.span.offset()),

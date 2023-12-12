@@ -1,11 +1,17 @@
 CC := ${WASI_SDK_PATH}/bin/clang
 CFLAGS := -g -O3 -I./ -Wall
 
-check-%-split: %.wat runtime-%.wat
-	cargo run -q $< 6 | wasmtime run --preload contract=- $(word 2,$^)
+check-%-split: %-split.wat runtime-%.wat
+	wasmtime run --preload contract=$^
 
 check-%: %.wat runtime-%.wat
 	wasmtime run --preload contract=$^
+
+analyze-%: %.wat
+	cargo run -q analyze $< standard
+
+%-split.wat: %.wat
+	cargo run -q split $< 6 > $@
 
 %.wat: %.wasm
 	wasm2wat $< -o $@
@@ -20,5 +26,4 @@ runtime-%.wasm: runtime-%.c
 
 clean:
 	-rm *.wasm *.wat *.elf
-
 .NOTINTERMEDIATE:

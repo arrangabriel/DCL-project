@@ -21,24 +21,35 @@ Build using cargo
 $ cargo build
 ```
 
-Run on `.wat` file
-```shell
-$ chop_up [input] [state size] > [output]
-```
-
 Alternatively build and run with single command
 ```shell
-$ cargo run [input] [state size] > [output]
+$ cargo run [subcommand] [opts...]
+```
+
+Run tests
+```shell
+$ cargo test
+```
+
+## Transformation
+
+Run on `.wat` file
+```shell
+$ chop_up split [input] [state size] [opts...] > [output]
 ```
 
 Optional flags:
  - `--skip-safe` - attempt to make optimized split decisions
  - `--explain` - add explanatory comments to output
 
-Run tests
+## Analysis
+
+Run on `.wat` file
 ```shell
-$ cargo test
+$ chop_up analyze [input] [output format]
 ```
+
+> output format is one of: `standard` or `csv`
 
 # Build and run examples
 
