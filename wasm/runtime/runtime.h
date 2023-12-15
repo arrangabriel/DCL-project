@@ -1,6 +1,14 @@
 #include <stdio.h>
 #include <stdint.h>
 
+#ifdef PROFILE
+    #define PRINT 0
+    #define ITERATIONS 100000000
+#else
+    #define PRINT 1
+    #define ITERATIONS 1
+#endif
+
 #ifdef __WASM__
 # define import(name)							\
 	__attribute__ ((import_module("contract"), import_name(name)))	\

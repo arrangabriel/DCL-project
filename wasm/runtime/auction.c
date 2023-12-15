@@ -52,8 +52,7 @@ void *__enter(uint32_t user, uint32_t item, uint32_t amount)
     __state.txlen = sizeof (struct tx);
     __tx.item = item;
     __tx.amount = amount;
-    struct utx init = {0};
-    __utx = init;
+    __utx = (struct utx) {0};
 
     return enter;
 }
@@ -77,4 +76,14 @@ uint32_t __get_bidder(uint32_t item_id)
 uint32_t __get_bid(uint32_t item_id)
 {
     return items[item_id].current_bid;
+}
+
+void __reset_user(uint32_t user_id) 
+{
+    balances[user_id] = 1000;
+}
+
+void __reset_item(uint32_t item_id)
+{
+    items[item_id] = (struct item) {0};
 }

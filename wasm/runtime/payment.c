@@ -80,3 +80,8 @@ uint32_t __get_balance(uint32_t user)
 {
 	return balances[user];
 }
+
+void __reset_user(uint32_t user)
+{
+    balances[user] = 0;
+}
