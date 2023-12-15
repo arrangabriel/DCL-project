@@ -1,6 +1,7 @@
+use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 
-use std::cmp::Ordering;
+use anyhow::{anyhow, Result};
 use wast::core::Instruction::{
     self as WastInstruction, Block, Br, BrIf, Drop, End, F32Const, F32Gt, F64Const, F64Gt, I32Add,
     I32Const, I32Eq, I32Eqz, I32GtS, I32GtU, I32Load, I32Load16u, I32LtS, I32LtU, I32Mul, I32Ne,
@@ -9,9 +10,7 @@ use wast::core::Instruction::{
     I64Xor, LocalGet, LocalSet, LocalTee, Return,
 };
 use wast::token::Index;
-use WastInstruction::{I32Store16, I64Store};
-
-use anyhow::{anyhow, Result};
+use WastInstruction::{I32And, I32Store16, I64Store};
 
 use crate::chop_up::instruction::{
     BenignInstructionType, BlockInstructionType, DataType, InstructionType,
@@ -41,6 +40,19 @@ impl<'a> Instruction<'a> {
             stack,
             scopes,
         }
+    }
+
+    pub fn default(
+        instr: &'a WastInstruction<'a>,
+        raw_text: String,
+    ) -> Self {
+        Self::new(
+            instr,
+            raw_text,
+            0,
+            Vec::default(),
+            Vec::default(),
+        )
     }
 }
 
@@ -134,7 +146,7 @@ impl StackEffect {
             I32Const(_) => Self::new(0, Some(DataType::I32), false, false),
             I32Mul | I32Add | I32Sub | I32Eq | F64Gt | F32Gt | I32GtU | I32GtS | I64GtU
             | I64GtS | I32LtU | I32LtS | I64LtU | I64LtS | I64Eq | I32Ne | I64Ne | I32Shl
-            | I32Xor => Self::new(2, Some(DataType::I32), false, false),
+            | I32Xor | I32And => Self::new(2, Some(DataType::I32), false, false),
             I64Mul | I64Add | I64Xor | I64Sub => Self::new(2, Some(DataType::I64), false, false),
             I32Store(_) | I32Store8(_) | I32Store16(_) | I64Store(_) => {
                 Self::new(2, None, false, false)

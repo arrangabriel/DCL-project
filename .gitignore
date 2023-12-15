@@ -1,5 +1,6 @@
 /target
 /wasm/**/*.wat
+/wasm/**/*.wasm
 /example-runtime-0
 /playground
 

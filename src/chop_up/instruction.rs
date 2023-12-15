@@ -1,16 +1,17 @@
-use crate::chop_up::instruction::DataType::*;
-use crate::chop_up::instruction::InstructionType::{Benign, Memory};
-use crate::chop_up::instruction_stream::Instruction;
-use crate::chop_up::instruction_stream::StackValue;
 use anyhow::{anyhow, Result};
 use wast::core::{Instruction as WastInstruction, ValType};
 use wast::core::Instruction::{I32Store16, I64Load32u, I64Store16};
 use WastInstruction::{
-    Block, DataDrop, ElemDrop, End, F32Load, F32Store, F64Load, F64Store, GlobalGet, GlobalSet,
+    Block, DataDrop, ElemDrop, End, F32Load, F32Store, F64Load, F64Store,
     I32Load, I32Load16u, I32Store, I32Store8, I64Load, I64Store, I64Store8, MemoryCopy,
     MemoryDiscard, MemoryFill, MemoryGrow, MemoryInit, MemorySize, Return, TableCopy, TableFill,
     TableGet, TableGrow, TableInit, TableSet, TableSize,
 };
+
+use crate::chop_up::instruction::DataType::*;
+use crate::chop_up::instruction::InstructionType::{Benign, Memory};
+use crate::chop_up::instruction_stream::Instruction;
+use crate::chop_up::instruction_stream::StackValue;
 
 #[derive(PartialEq, Clone)]
 pub enum InstructionType {
@@ -88,7 +89,7 @@ pub enum MemoryInstructionSubtype {
     SixteenU,
     ThirtyTwoU,
     Eight,
-    Sixteen
+    Sixteen,
 }
 
 impl MemoryInstructionSubtype {
@@ -187,24 +188,19 @@ fn type_from_store(
 }
 
 fn is_other_memory_instruction(instruction: &WastInstruction) -> bool {
-    matches!(
-        instruction,
-        GlobalGet(_)
-            | GlobalSet(_)
-            | TableGet(_)
-            | TableSet(_)
-            | MemorySize(_)
-            | MemoryGrow(_)
-            | MemoryInit(_)
-            | MemoryCopy(_)
-            | MemoryFill(_)
-            | MemoryDiscard(_)
-            | DataDrop(_)
-            | ElemDrop(_)
-            | TableInit(_)
-            | TableCopy(_)
-            | TableFill(_)
-            | TableSize(_)
-            | TableGrow(_)
-    )
+    matches!(instruction, TableGet(_)
+        | TableSet(_)
+        | MemorySize(_)
+        | MemoryGrow(_)
+        | MemoryInit(_)
+        | MemoryCopy(_)
+        | MemoryFill(_)
+        | MemoryDiscard(_)
+        | DataDrop(_)
+        | ElemDrop(_)
+        | TableInit(_)
+        | TableCopy(_)
+        | TableFill(_)
+        | TableSize(_)
+        | TableGrow(_))
 }

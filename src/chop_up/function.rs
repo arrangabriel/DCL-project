@@ -65,46 +65,49 @@ impl<'a> Function<'a> {
                 let actual_len = instruction_string.len() - paren_imbalance as usize;
                 instruction_string = instruction_string[..actual_len].trim().to_string();
             }
-            // Here there is a possibly scary assumption made.
-            // That the compiler will not use named arguments to local-instructions
-            // To fix we must also handle the [Index::Id] case
-            match instruction {
-                WastInstruction::LocalSet(Index::Num(i, _))
-                | WastInstruction::LocalTee(Index::Num(i, _)) => {
-                    if index_is_param(*i) {
-                        let new_name = if let Some((_, new_name)) =
-                            remapped_locals.iter().find(|(param, _)| param.eq(i))
-                        {
-                            *new_name
-                        } else {
-                            let new_name =
-                                (UTX_LOCALS.len() + local_types.len() + remapped_locals.len())
-                                    as u32;
-                            remapped_locals.push((*i, new_name));
-                            new_name
-                        };
-                        instruction_string = format!(
-                            "{base_instruction} {new_name}",
-                            base_instruction = &instruction_string[..instruction_string.len() - 2]
-                        );
-                    }
-                }
-                WastInstruction::LocalGet(Index::Num(i, _)) => {
-                    if index_is_param(*i) {
-                        if let Some(new_name) = remapped_locals
-                            .iter()
-                            .find(|(param, _)| param.eq(i))
-                            .map(|(_, new_name)| *new_name)
-                        {
+            // Don't do remapping if we are simply getting the function the function
+            if !name.starts_with(IGNORE_FUNC_PREFIX) {
+                // Here there is a possibly scary assumption made.
+                // That the compiler will not use named arguments to local-instructions
+                // To fix we must also handle the [Index::Id] case
+                match instruction {
+                    WastInstruction::LocalSet(Index::Num(i, _))
+                    | WastInstruction::LocalTee(Index::Num(i, _)) => {
+                        if index_is_param(*i) {
+                            let new_name = if let Some((_, new_name)) =
+                                remapped_locals.iter().find(|(param, _)| param.eq(i))
+                            {
+                                *new_name
+                            } else {
+                                let new_name =
+                                    (UTX_LOCALS.len() + local_types.len() + remapped_locals.len())
+                                        as u32;
+                                remapped_locals.push((*i, new_name));
+                                new_name
+                            };
                             instruction_string = format!(
                                 "{base_instruction} {new_name}",
-                                base_instruction =
-                                &instruction_string[..instruction_string.len() - 2]
+                                base_instruction = &instruction_string[..instruction_string.len() - 2]
                             );
                         }
                     }
+                    WastInstruction::LocalGet(Index::Num(i, _)) => {
+                        if index_is_param(*i) {
+                            if let Some(new_name) = remapped_locals
+                                .iter()
+                                .find(|(param, _)| param.eq(i))
+                                .map(|(_, new_name)| *new_name)
+                            {
+                                instruction_string = format!(
+                                    "{base_instruction} {new_name}",
+                                    base_instruction =
+                                    &instruction_string[..instruction_string.len() - 2]
+                                );
+                            }
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
             instructions_with_raw_text.push((instruction, instruction_string))
         }
@@ -121,14 +124,7 @@ impl<'a> Function<'a> {
                 local_types,
                 instructions: instructions_with_raw_text
                     .into_iter()
-                    .enumerate()
-                    .map(|(i, (instr, raw_text))| Instruction {
-                        instr,
-                        raw_text,
-                        scopes: Vec::default(),
-                        stack: Vec::default(),
-                        index: instruction_base_line_index + i,
-                    })
+                    .map(|(instr, raw_text)| Instruction::default(instr, raw_text))
                     .collect(),
             });
         }
@@ -187,7 +183,7 @@ impl<'a> Function<'a> {
             ));
         }
 
-        Ok(Function {
+        Ok(Self {
             name,
             local_types,
             signature,
