@@ -4,6 +4,9 @@ CFLAGS := -g -O3 -I./ -Wall
 .check-profiler:
 	@test $${PROFILER?Please set environment variable PROFILER}
 
+.check-state-size:
+	@test $${STATE_SIZE?Please set environment variable STATE_SIZE}
+
 check-%-split-profile: %-split.wat runtime-%-profile.wat .check-profiler
 	${PROFILER} wasmtime run --preload contract=$^
 
@@ -19,11 +22,12 @@ check-%: %.wat runtime-%.wat
 analyze-%: %.wat
 	cargo run -q analyze $< standard
 
-%-split.wat: %.wat
-	cargo run -q split $< 6 > $@
+%-split.wat: %.wat .check-state-size
+	cargo run -q split $< ${STATE_SIZE} ${SPLIT_FLAGS} > $@
 
 %.wat: %.wasm
 	wasm2wat $< -o $@
+	rm $^
 
 runtime-%-profile.wasm: runtime-%.c
 	$(CC) $(CFLAGS) -D PROFILE --target=wasm32-wasi -D__WASM__ \
