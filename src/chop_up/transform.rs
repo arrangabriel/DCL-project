@@ -143,7 +143,6 @@ pub fn handle_instructions<'a>(
                                 .map(|i| instruction.scopes[i].stack_start)
                                 .unwrap_or(0);
                             transformer.emit_save_stack_and_locals(
-                                transformer.stack_base,
                                 &instruction.stack,
                                 prev_stack_start,
                                 true,

@@ -125,7 +125,6 @@ pub fn handle_pre_split<'a>(
         .unwrap_or(0);
     let stack = &culprit.stack[..culprit.stack.len() - to_remove];
     transformer.emit_save_stack_and_locals(
-        transformer.stack_base,
         stack,
         stack_start,
         false,
@@ -175,7 +174,6 @@ pub fn handle_split<'a>(
     );
     transformer.emit_restore_locals(
         &split.locals,
-        transformer.stack_base,
         &split.saved_stack,
     );
     if split.scopes.is_empty() {

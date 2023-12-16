@@ -11,10 +11,11 @@ pub struct WatEmitter<'a> {
     output_writer: &'a mut dyn Write,
     pub skip_safe_splits: bool,
     pub state_base: usize,
-    pub stack_base: usize,
+    stack_base: usize,
     pub utx_function_names: Vec<(usize, String)>,
     pub current_scope_level: usize,
     explain: bool,
+    state_usage: Vec<usize>,
 }
 
 impl<'a> WatEmitter<'a> {
@@ -28,10 +29,14 @@ impl<'a> WatEmitter<'a> {
             output_writer,
             skip_safe_splits,
             state_base,
+            // The first part of state is used by user state
+            // The next 8 bytes for saving store values over splits
+            // After this the next are to be used to saved locals and stack
             stack_base: state_base + 8,
             utx_function_names: Vec::default(),
             current_scope_level: 0,
             explain,
+            state_usage: Vec::default(),
         }
     }
 
@@ -129,29 +134,31 @@ impl<'a> WatEmitter<'a> {
 
     pub fn emit_save_stack_and_locals(
         &mut self,
-        stack_base: usize,
         stack: &[StackValue],
         from: usize,
         keep_stack: bool,
         locals: &[DataType],
     ) {
         let already_saved_size: usize = stack[..from].iter().map(|value| value.ty.size()).sum();
-        let mut offset = stack_base + already_saved_size;
+        let mut offset = self.stack_base + already_saved_size;
         let stack = &stack[from..];
-        let set_flavour = if keep_stack { "tee" } else { "set" };
-        let stack_save_instructions = stack.iter().rev().flat_map(|StackValue { ty, .. }| {
+        let mut stack_save_instructions = Vec::default();
+        for StackValue { ty, .. } in stack.iter().rev() {
             let ty_str = ty.as_str();
             let instructions = [
-                format!("local.{set_flavour} ${ty_str}_{STACK_JUGGLER_NAME}"),
+                format!(
+                    "local.{set_flavor} ${ty_str}_{STACK_JUGGLER_NAME}",
+                    set_flavor = if keep_stack { "tee" } else { "set" }
+                ),
                 "local.get $state".to_string(),
                 format!("local.get ${ty_str}_{STACK_JUGGLER_NAME}"),
                 format!("{ty_str}.store offset={offset}"),
             ];
             offset += ty.size();
-            instructions
-        });
+            stack_save_instructions.extend_from_slice(&instructions);
+        }
 
-        for (i, instruction) in stack_save_instructions.enumerate() {
+        for (i, instruction) in stack_save_instructions.iter().enumerate() {
             let annotation = match i {
                 0 => Some(format!(
                     "Save stack - [{stack}]",
@@ -159,14 +166,16 @@ impl<'a> WatEmitter<'a> {
                 )),
                 3 => Some(format!(
                     "First {n} bytes reserved for user defined state struct and potential store value",
-                    n = stack_base
+                    n = self.stack_base
                 )),
                 _ => None,
             };
-            self.emit_instruction(&instruction, annotation);
+            self.emit_instruction(instruction, annotation);
         }
 
-        let local_save_instructions = locals.iter().enumerate().flat_map(|(i, ty)| {
+
+        let mut local_save_instructions = Vec::default();
+        for (i, ty) in locals.iter().enumerate() {
             let ty_str = ty.as_str();
             let instructions = [
                 "local.get $state".to_string(),
@@ -177,10 +186,12 @@ impl<'a> WatEmitter<'a> {
                 format!("{ty_str}.store offset={offset}"),
             ];
             offset += ty.size();
-            instructions
-        });
+            local_save_instructions.extend_from_slice(&instructions);
+        }
 
-        for (i, instruction) in local_save_instructions.enumerate() {
+        self.state_usage.push(offset - self.state_base);
+
+        for (i, instruction) in local_save_instructions.iter().enumerate() {
             let annotation = match i {
                 0 => Some(format!(
                     "Save locals - [{locals}]",
@@ -188,7 +199,7 @@ impl<'a> WatEmitter<'a> {
                 )),
                 _ => None,
             };
-            self.emit_instruction(&instruction, annotation);
+            self.emit_instruction(instruction, annotation);
         }
     }
 
@@ -226,14 +237,13 @@ impl<'a> WatEmitter<'a> {
     pub fn emit_restore_locals(
         &mut self,
         locals: &[DataType],
-        stack_base: usize,
         stack: &[StackValue],
     ) {
-        let mut offset = stack_base
+        let mut offset = self.stack_base
             + stack
-                .iter()
-                .map(|StackValue { ty, .. }| ty.size())
-                .sum::<usize>();
+            .iter()
+            .map(|StackValue { ty, .. }| ty.size())
+            .sum::<usize>();
         let instructions = locals.iter().enumerate().flat_map(|(i, ty)| {
             let ty_str = ty.as_str();
             let instructions = [
@@ -263,7 +273,7 @@ impl<'a> WatEmitter<'a> {
     pub fn emit_funcref_table(&mut self) {
         if !self.utx_function_names.is_empty() {
             self.writeln(
-                &format!("(table {} funcref)", self.utx_function_names.len() + 1,),
+                &format!("(table {} funcref)", self.utx_function_names.len() + 1, ),
                 MODULE_MEMBER_INDENT,
             );
 
